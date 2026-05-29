@@ -2,7 +2,6 @@
 Integration tests for serve.py Flask routes.
 """
 
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -11,48 +10,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
-
-def _sha256(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# Auth: setup flow
-# ---------------------------------------------------------------------------
-
-class TestSetup:
-    def test_get_setup_when_no_user(self, client, monkeypatch):
-        import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
-        r = client.get("/setup")
-        assert r.status_code == 200
-
-    def test_setup_redirects_to_login_if_user_exists(self, client):
-        r = client.get("/setup")
-        assert r.status_code == 302
-        assert "/auth/login" in r.headers["Location"]
-
-    def test_setup_post_creates_user_and_redirects(self, client, monkeypatch):
-        import serve
-        pw_file = serve.DATA_DIR / "nopasswd"
-        monkeypatch.setattr(serve, "PASSWD_FILE", pw_file)
-        r = client.post("/setup", data={"password": "newpassword", "confirm": "newpassword"})
-        assert r.status_code == 302
-        assert pw_file.exists()
-
-    def test_setup_post_password_mismatch(self, client, monkeypatch):
-        import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
-        r = client.post("/setup", data={"password": "abc12345", "confirm": "different"})
-        assert r.status_code == 200
-        assert b"do not match" in r.data
-
-    def test_setup_post_too_short(self, client, monkeypatch):
-        import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
-        r = client.post("/setup", data={"password": "short", "confirm": "short"})
-        assert r.status_code == 200
-        assert b"8 characters" in r.data
+TEST_EMAIL = "test@example.com"
+TEST_PASSWORD = "testpass1"
 
 
 # ---------------------------------------------------------------------------
@@ -65,22 +24,36 @@ class TestAuth:
         assert r.status_code == 200
 
     def test_login_success_redirects_to_tasks(self, client):
-        r = client.post("/auth/login", data={"password": "testpass1"})
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "test-csrf"
+        r = client.post("/auth/login",
+                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                              "csrf_token": "test-csrf"})
         assert r.status_code == 302
         assert "/tasks" in r.headers["Location"]
 
     def test_login_wrong_password(self, client):
-        r = client.post("/auth/login", data={"password": "wrongpass"})
+        # Pre-seed a csrf_token in session
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "test-csrf"
+        r = client.post("/auth/login",
+                        data={"email": TEST_EMAIL, "password": "wrongpass",
+                              "csrf_token": "test-csrf"})
         assert r.status_code == 200
-        assert b"Incorrect password" in r.data
+        assert b"Incorrect" in r.data
 
     def test_login_next_param(self, client):
-        r = client.post("/auth/login?next=/tasks", data={"password": "testpass1"})
+        with client.session_transaction() as sess:
+            sess["csrf_token"] = "test-csrf"
+        r = client.post("/auth/login?next=/tasks",
+                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                              "csrf_token": "test-csrf"})
         assert r.status_code == 302
         assert "/tasks" in r.headers["Location"]
 
     def test_logout_clears_session(self, authed_client):
-        r = authed_client.post("/auth/logout")
+        r = authed_client.post("/auth/logout",
+                               data={"csrf_token": "test-csrf"})
         assert r.status_code == 302
         # After logout, /tasks should redirect to login
         r2 = authed_client.get("/tasks")
@@ -127,7 +100,6 @@ class TestToggle:
         assert r.get_json()["ok"] is True
 
     def test_toggle_reopen(self, authed_client):
-        # First complete task 0, then reopen it
         authed_client.post(
             "/tasks/toggle",
             data=json.dumps({"line": 0, "action": "complete"}),

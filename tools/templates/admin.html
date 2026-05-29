@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Admin — doit{% endblock %}
+{% block body %}
+<div class="page">
+<div style="padding:24px;">
+  <h1 style="font-size:22px;font-weight:700;margin-bottom:24px;">Admin — Users</h1>
+
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead>
+      <tr style="background:var(--bg3);">
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Email</th>
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Status</th>
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Tasks</th>
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Admin</th>
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Created</th>
+        <th style="padding:8px;text-align:left;border:1px solid var(--border);">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+    <tr style="background:{% if loop.index0 % 2 == 0 %}var(--bg){% else %}var(--bg2){% endif %};">
+      <td style="padding:8px;border:1px solid var(--border);">
+        {{ u.email }}
+        {% if not u.verified %}<span style="color:var(--text2);font-size:11px;"> (unverified)</span>{% endif %}
+      </td>
+      <td style="padding:8px;border:1px solid var(--border);">
+        {% if u.suspended %}<span style="color:#ff3b30;">Suspended</span>
+        {% else %}<span style="color:#34c759;">Active</span>{% endif %}
+      </td>
+      <td style="padding:8px;border:1px solid var(--border);">{{ u._task_count }}</td>
+      <td style="padding:8px;border:1px solid var(--border);">{{ 'Yes' if u.admin else 'No' }}</td>
+      <td style="padding:8px;border:1px solid var(--border);">{{ u.created_at[:10] if u.created_at else '—' }}</td>
+      <td style="padding:8px;border:1px solid var(--border);">
+        <form method="post" action="/admin/users/{{ u.id }}/suspend" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn-ghost btn-sm">
+            {% if u.suspended %}Unsuspend{% else %}Suspend{% endif %}
+          </button>
+        </form>
+        {% if u.id != current_user.id %}
+        <form method="post" action="/admin/users/{{ u.id }}/toggle-admin" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn-ghost btn-sm">
+            {% if u.admin %}Remove Admin{% else %}Make Admin{% endif %}
+          </button>
+        </form>
+        <form method="post" action="/admin/users/{{ u.id }}/delete?confirm=yes"
+              style="display:inline;"
+              onsubmit="return confirm('Delete user {{ u.email }}?')">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+        </form>
+        {% endif %}
+        {% if not u.verified %}
+        <form method="post" action="/admin/users/{{ u.id }}/resend-verify" style="display:inline;">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn-ghost btn-sm">Resend Verify</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+</div>
+{% endblock %}

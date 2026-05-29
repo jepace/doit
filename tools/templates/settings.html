@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Settings — doit{% endblock %}
+{% block body %}
+<div class="page">
+<div style="padding:24px;max-width:480px;margin:0 auto;">
+  <h1 style="font-size:22px;font-weight:700;margin-bottom:24px;">Settings</h1>
+
+  {% if error %}<div style="background:#ff3b3022;color:#ff3b30;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:16px;">{{ error }}</div>{% endif %}
+  {% if success %}<div style="background:#34c75922;color:#34c759;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:16px;">{{ success }}</div>{% endif %}
+
+  <section style="background:var(--bg2);border-radius:12px;padding:20px;margin-bottom:20px;">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Preferences</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="prefs">
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Theme</label>
+        <select name="theme" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;">
+          <option value="system" {% if prefs.theme == 'system' %}selected{% endif %}>System</option>
+          <option value="light" {% if prefs.theme == 'light' %}selected{% endif %}>Light</option>
+          <option value="dark" {% if prefs.theme == 'dark' %}selected{% endif %}>Dark</option>
+        </select>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Font Size</label>
+        <select name="font_size" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;">
+          <option value="small" {% if prefs.font_size == 'small' %}selected{% endif %}>Small</option>
+          <option value="medium" {% if prefs.font_size == 'medium' %}selected{% endif %}>Medium</option>
+          <option value="large" {% if prefs.font_size == 'large' %}selected{% endif %}>Large</option>
+        </select>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
+    </form>
+  </section>
+
+  <section style="background:var(--bg2);border-radius:12px;padding:20px;margin-bottom:20px;">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Change Email</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="change-email">
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">New Email</label>
+        <input type="email" name="email" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Change Email</button>
+    </form>
+  </section>
+
+  <section style="background:var(--bg2);border-radius:12px;padding:20px;">
+    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Change Password</h2>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="change-password">
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Current Password</label>
+        <input type="password" name="current_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">New Password</label>
+        <input type="password" name="new_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Confirm New Password</label>
+        <input type="password" name="confirm_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-sm">Change Password</button>
+    </form>
+  </section>
+</div>
+</div>
+{% endblock %}
