@@ -13,8 +13,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR  = REPO_ROOT / "data"
 
-# Legacy constant kept for backwards-compat with tools/tasks.py CLI
-TASKS_FILE = REPO_ROOT / "wiki" / "tasks.md"
 
 
 def get_tasks_file(user_id: str) -> Path:
@@ -181,10 +179,8 @@ class Task:
         return next_task
 
 
-def read_tasks(tasks_file: Path | None = None):
-    """Read all tasks from the given tasks file (defaults to legacy TASKS_FILE)."""
-    if tasks_file is None:
-        tasks_file = TASKS_FILE
+def read_tasks(tasks_file: Path):
+    """Read all tasks from the given tasks file."""
     if not tasks_file.exists():
         return []
 
@@ -223,10 +219,8 @@ def read_tasks(tasks_file: Path | None = None):
     return tasks
 
 
-def write_tasks(tasks, tasks_file: Path | None = None):
-    """Write updated tasks back to the given tasks file (defaults to legacy TASKS_FILE)."""
-    if tasks_file is None:
-        tasks_file = TASKS_FILE
+def write_tasks(tasks, tasks_file: Path):
+    """Write updated tasks back to the given tasks file."""
     if not tasks_file.exists():
         return
 
@@ -265,11 +259,11 @@ def write_tasks(tasks, tasks_file: Path | None = None):
     tasks_file.write_text('\n'.join(new_lines), encoding='utf-8')
 
 
-def get_all_contexts(tasks_file: Path | None = None):
+def get_all_contexts(tasks_file: Path):
     return sorted(set(t.context for t in read_tasks(tasks_file) if t.context))
 
-def get_all_projects(tasks_file: Path | None = None):
+def get_all_projects(tasks_file: Path):
     return sorted(set(t.project for t in read_tasks(tasks_file) if t.project))
 
-def get_all_sections(tasks_file: Path | None = None):
+def get_all_sections(tasks_file: Path):
     return sorted(set(t.section for t in read_tasks(tasks_file) if t.section))

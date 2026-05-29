@@ -106,6 +106,15 @@ def _ip() -> str:
     return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
 
 
+def _safe_next(url: str) -> str:
+    """Return url only if it's a safe relative path, otherwise /tasks."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme or parsed.netloc:
+        return url_for("tasks")
+    return url or url_for("tasks")
+
+
 # ---------------------------------------------------------------------------
 # User context
 # ---------------------------------------------------------------------------
@@ -249,7 +258,7 @@ def auth_login():
                 session.clear()
                 session["user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_hex(32)
-                next_url = request.form.get("next") or request.args.get("next") or url_for("tasks")
+                next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
                 return redirect(next_url)
             elif err == "Please verify your email address before signing in.":
                 # Resend verification and show pending page
@@ -526,7 +535,7 @@ def settings():
                                    f"http://127.0.0.1:{cfg_int('server','port',8080)}")
                 send_verification_email(new_email, token, base_url)
                 session.clear()
-                return redirect(url_for("verify_pending") + f"?email={new_email}")
+                return redirect(url_for("verify_pending", email=new_email))
             except ValueError as e:
                 errors["email"] = str(e)
 
@@ -614,8 +623,8 @@ if __name__ == "__main__":
     port  = cfg_int("server", "port", 8080)
     debug = cfg_bool("server", "debug", False)
 
-    # Ensure data dirs exist
-    (DATA_DIR / "users").mkdir(parents=True, exist_ok=True)
+    # Ensure data dir exists
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not UserStore.list_users():
         print(f"\n  No users exist yet. Register at: http://{host}:{port}/register\n")

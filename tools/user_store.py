@@ -273,15 +273,16 @@ class UserStore:
         for user in cls.list_users():
             if user.get("verify_token_hash") != h:
                 continue
-            exp = user.get("verify_token_expires")
-            try:
-                if exp and datetime.utcnow() > datetime.fromisoformat(exp):
-                    return None
-            except ValueError:
-                return None
             with _get_lock(user["id"]):
+                # Re-read inside lock to avoid TOCTOU
                 p = _read_json(_profile_path(user["id"]))
-                if p is None:
+                if p is None or p.get("verify_token_hash") != h:
+                    return None
+                exp = p.get("verify_token_expires")
+                try:
+                    if exp and datetime.utcnow() > datetime.fromisoformat(exp):
+                        return None
+                except ValueError:
                     return None
                 p["verified"]             = True
                 p["verify_token_hash"]    = None
@@ -313,21 +314,22 @@ class UserStore:
         for user in cls.list_users():
             if user.get("reset_token_hash") != h:
                 continue
-            exp = user.get("reset_token_expires")
-            try:
-                if exp and datetime.utcnow() > datetime.fromisoformat(exp):
-                    return False
-            except ValueError:
-                return False
             with _get_lock(user["id"]):
+                # Re-read inside lock to avoid TOCTOU
                 p = _read_json(_profile_path(user["id"]))
-                if p is None:
+                if p is None or p.get("reset_token_hash") != h:
                     return False
-                p["password_hash"]    = generate_password_hash(new_password)
-                p["reset_token_hash"] = None
+                exp = p.get("reset_token_expires")
+                try:
+                    if exp and datetime.utcnow() > datetime.fromisoformat(exp):
+                        return False
+                except ValueError:
+                    return False
+                p["password_hash"]       = generate_password_hash(new_password)
+                p["reset_token_hash"]    = None
                 p["reset_token_expires"] = None
-                p["failed_logins"]    = 0
-                p["locked_until"]     = None
+                p["failed_logins"]       = 0
+                p["locked_until"]        = None
                 _write_json(_profile_path(user["id"]), p)
             return True
         return False
