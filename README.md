@@ -1,6 +1,6 @@
 # doit
 
-A lightweight personal task manager. Tasks live in `data/tasks.md` as plain markdown with inline tags.
+A lightweight personal task manager. Tasks are stored as plain markdown with inline tags, one file per user.
 
 ## Setup
 
