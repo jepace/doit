@@ -4,7 +4,8 @@
     "port":     8080,
     "https":    false,
     "base_url": "http://localhost:8080",
-    "secret":   ""
+    "secret":   "",
+    "_secret_help": "Flask session secret key — signs login cookies. Leave blank to auto-generate (saved to data/.secret). To set manually: python3 -c \"import secrets; print(secrets.token_hex(32))\""
   },
   "email": {
     "resend_api_key": "",
