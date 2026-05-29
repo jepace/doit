@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
 """
-Task manager for data/tasks.md. Parses, filters, and updates tasks.
+Task manager for data/{user_id}/tasks.md. Parses, filters, and updates tasks.
 """
 
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
-TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "tasks.md"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = REPO_ROOT / "data"
+
+# Legacy single-file path (used by tests via monkeypatching)
+TASKS_FILE = DATA_DIR / "tasks.md"
+
+
+def get_tasks_file(user_id: str) -> Path:
+    """Return the tasks file path for a given user_id."""
+    return DATA_DIR / user_id / "tasks.md"
 
 
 class Task:
@@ -174,12 +183,18 @@ class Task:
         return next_task
 
 
-def read_tasks():
-    """Read all tasks from data/tasks.md."""
-    if not TASKS_FILE.exists():
+def read_tasks(tasks_file: Path = None) -> list:
+    """Read all tasks from a tasks.md file.
+
+    If tasks_file is None, uses the legacy TASKS_FILE global (for backward compat).
+    """
+    if tasks_file is None:
+        tasks_file = TASKS_FILE
+
+    if not tasks_file.exists():
         return []
 
-    lines = TASKS_FILE.read_text(encoding='utf-8').split('\n')
+    lines = tasks_file.read_text(encoding='utf-8').split('\n')
     tasks = []
     current_section = None
     i = 0
@@ -214,12 +229,18 @@ def read_tasks():
     return tasks
 
 
-def write_tasks(tasks):
-    """Write updated tasks back to data/tasks.md."""
-    if not TASKS_FILE.exists():
+def write_tasks(tasks: list, tasks_file: Path = None) -> None:
+    """Write updated tasks back to a tasks.md file.
+
+    If tasks_file is None, uses the legacy TASKS_FILE global (for backward compat).
+    """
+    if tasks_file is None:
+        tasks_file = TASKS_FILE
+
+    if not tasks_file.exists():
         return
 
-    lines = TASKS_FILE.read_text(encoding='utf-8').split('\n')
+    lines = tasks_file.read_text(encoding='utf-8').split('\n')
     task_map = {t.line_num: t for t in tasks}
     new_lines = []
     i = 0
@@ -251,14 +272,14 @@ def write_tasks(tasks):
         new_lines.append(line)
         i += 1
 
-    TASKS_FILE.write_text('\n'.join(new_lines), encoding='utf-8')
+    tasks_file.write_text('\n'.join(new_lines), encoding='utf-8')
 
 
-def get_all_contexts():
-    return sorted(set(t.context for t in read_tasks() if t.context))
+def get_all_contexts(tasks_file: Path = None):
+    return sorted(set(t.context for t in read_tasks(tasks_file) if t.context))
 
-def get_all_projects():
-    return sorted(set(t.project for t in read_tasks() if t.project))
+def get_all_projects(tasks_file: Path = None):
+    return sorted(set(t.project for t in read_tasks(tasks_file) if t.project))
 
-def get_all_sections():
-    return sorted(set(t.section for t in read_tasks() if t.section))
+def get_all_sections(tasks_file: Path = None):
+    return sorted(set(t.section for t in read_tasks(tasks_file) if t.section))
