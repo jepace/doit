@@ -27,12 +27,12 @@ from config import cfg_get, cfg_bool, cfg_int
 from task_manager import read_tasks, write_tasks, get_all_contexts, get_all_projects, TASKS_FILE
 
 REPO_ROOT  = Path(__file__).resolve().parent.parent
-WIKI_DIR   = REPO_ROOT / "wiki"
-PASSWD_FILE = WIKI_DIR / ".passwd"
+DATA_DIR   = REPO_ROOT / "data"
+PASSWD_FILE = DATA_DIR / ".passwd"
 
 app = Flask(__name__, template_folder="templates")
 
-_secret_file = WIKI_DIR / ".secret"
+_secret_file = DATA_DIR / ".secret"
 _secret = cfg_get("server", "secret")
 if _secret:
     app.secret_key = _secret
@@ -63,7 +63,7 @@ def user_exists() -> bool:
 
 
 def create_user(password: str) -> None:
-    WIKI_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     PASSWD_FILE.write_text(_hash_password(password))
 
 
@@ -141,7 +141,7 @@ def index():
 # ---------------------------------------------------------------------------
 
 def _toggle_task(line_num: int, action: str) -> bool:
-    tasks_file = WIKI_DIR / "tasks.md"
+    tasks_file = DATA_DIR / "tasks.md"
     lines = tasks_file.read_text(encoding="utf-8").splitlines()
 
     task_count = 0
@@ -159,7 +159,7 @@ def _toggle_task(line_num: int, action: str) -> bool:
 
 
 def _add_task(text: str, section: str = "Inbox") -> None:
-    tasks_file = WIKI_DIR / "tasks.md"
+    tasks_file = DATA_DIR / "tasks.md"
     if not tasks_file.exists():
         tasks_file.write_text("# Tasks\n\n## Inbox\n\n", encoding="utf-8")
     content = tasks_file.read_text(encoding="utf-8")

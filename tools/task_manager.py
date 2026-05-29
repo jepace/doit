@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
+Task manager for data/tasks.md. Parses, filters, and updates tasks.
 """
 
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
-TASKS_FILE = Path(__file__).resolve().parent.parent / "wiki" / "tasks.md"
+TASKS_FILE = Path(__file__).resolve().parent.parent / "data" / "tasks.md"
 
 
 class Task:
@@ -175,7 +175,7 @@ class Task:
 
 
 def read_tasks():
-    """Read all tasks from wiki/tasks.md."""
+    """Read all tasks from data/tasks.md."""
     if not TASKS_FILE.exists():
         return []
 
@@ -215,7 +215,7 @@ def read_tasks():
 
 
 def write_tasks(tasks):
-    """Write updated tasks back to wiki/tasks.md."""
+    """Write updated tasks back to data/tasks.md."""
     if not TASKS_FILE.exists():
         return
 

@@ -59,3 +59,4 @@ Recurring example:
 - [ ] Task description #p:high #due:YYYY-MM-DD #ctx:work
 
 -->
+- [ ] Write report #due:2026-06-06 #p:high #proj:acme #rep:1w

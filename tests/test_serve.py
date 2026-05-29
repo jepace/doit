@@ -23,7 +23,7 @@ def _sha256(pw: str) -> str:
 class TestSetup:
     def test_get_setup_when_no_user(self, client, monkeypatch):
         import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.WIKI_DIR / "nopasswd")
+        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
         r = client.get("/setup")
         assert r.status_code == 200
 
@@ -34,7 +34,7 @@ class TestSetup:
 
     def test_setup_post_creates_user_and_redirects(self, client, monkeypatch):
         import serve
-        pw_file = serve.WIKI_DIR / "nopasswd"
+        pw_file = serve.DATA_DIR / "nopasswd"
         monkeypatch.setattr(serve, "PASSWD_FILE", pw_file)
         r = client.post("/setup", data={"password": "newpassword", "confirm": "newpassword"})
         assert r.status_code == 302
@@ -42,14 +42,14 @@ class TestSetup:
 
     def test_setup_post_password_mismatch(self, client, monkeypatch):
         import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.WIKI_DIR / "nopasswd")
+        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
         r = client.post("/setup", data={"password": "abc12345", "confirm": "different"})
         assert r.status_code == 200
         assert b"do not match" in r.data
 
     def test_setup_post_too_short(self, client, monkeypatch):
         import serve
-        monkeypatch.setattr(serve, "PASSWD_FILE", serve.WIKI_DIR / "nopasswd")
+        monkeypatch.setattr(serve, "PASSWD_FILE", serve.DATA_DIR / "nopasswd")
         r = client.post("/setup", data={"password": "short", "confirm": "short"})
         assert r.status_code == 200
         assert b"8 characters" in r.data

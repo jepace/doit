@@ -39,9 +39,9 @@ def tmp_tasks_file(tmp_path, monkeypatch):
     """
     import task_manager
 
-    wiki = tmp_path / "wiki"
-    wiki.mkdir()
-    tasks_file = wiki / "tasks.md"
+    data = tmp_path / "data"
+    data.mkdir()
+    tasks_file = data / "tasks.md"
     tasks_file.write_text(STOCK_TASKS, encoding="utf-8")
 
     monkeypatch.setattr(task_manager, "TASKS_FILE", tasks_file)
@@ -52,23 +52,23 @@ def tmp_tasks_file(tmp_path, monkeypatch):
 def client(tmp_path, monkeypatch):
     """
     Flask test client with:
-    - a temp wiki dir (tasks.md + .passwd)
-    - WIKI_DIR and PASSWD_FILE patched in serve
+    - a temp data dir (tasks.md + .passwd)
+    - DATA_DIR and PASSWD_FILE patched in serve
     - task_manager.TASKS_FILE patched to the same file
     - a valid password hash written to .passwd
     """
     import task_manager
     import serve
 
-    wiki = tmp_path / "wiki"
-    wiki.mkdir()
-    tasks_file = wiki / "tasks.md"
+    data = tmp_path / "data"
+    data.mkdir()
+    tasks_file = data / "tasks.md"
     tasks_file.write_text(STOCK_TASKS, encoding="utf-8")
 
-    passwd_file = wiki / ".passwd"
+    passwd_file = data / ".passwd"
     passwd_file.write_text(_sha256("testpass1"))
 
-    monkeypatch.setattr(serve, "WIKI_DIR", wiki)
+    monkeypatch.setattr(serve, "DATA_DIR", data)
     monkeypatch.setattr(serve, "PASSWD_FILE", passwd_file)
     monkeypatch.setattr(task_manager, "TASKS_FILE", tasks_file)
 

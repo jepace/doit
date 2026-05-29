@@ -2,7 +2,7 @@
 """
 doit — Task Filter CLI
 
-Reads wiki/tasks.md and filters/displays tasks.
+Reads data/tasks.md and filters/displays tasks.
 
 Usage: python3 tools/tasks.py [options]
 
@@ -35,14 +35,14 @@ PRIORITY_ORDER = {"top": 0, "high": 1, "medium": 2, "low": 3}
 
 def find_tasks_file(script_path):
     repo_root = script_path.resolve().parent.parent
-    tasks_file = repo_root / "wiki" / "tasks.md"
+    tasks_file = repo_root / "data" / "tasks.md"
     if tasks_file.exists():
         return tasks_file
-    cwd_tasks = Path.cwd() / "wiki" / "tasks.md"
+    cwd_tasks = Path.cwd() / "data" / "tasks.md"
     if cwd_tasks.exists():
         return cwd_tasks
     raise FileNotFoundError(
-        f"Cannot find wiki/tasks.md at {tasks_file} or {cwd_tasks}\n"
+        f"Cannot find data/tasks.md at {tasks_file} or {cwd_tasks}\n"
         "Run from the repository root or the tools/ directory."
     )
 
