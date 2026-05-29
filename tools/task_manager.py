@@ -148,8 +148,13 @@ class Task:
                 year += 1
             try:
                 next_due = base.replace(year=year, month=month)
-            except ValueError:  # Day doesn't exist in target month
-                next_due = base.replace(year=year, month=month, day=1) - timedelta(days=1)
+            except ValueError:  # day doesn't exist in target month — clamp to last day
+                overflow_month = month + 1
+                overflow_year  = year
+                if overflow_month > 12:
+                    overflow_month = 1
+                    overflow_year += 1
+                next_due = base.replace(year=overflow_year, month=overflow_month, day=1) - timedelta(days=1)
         elif unit == 'y':
             next_due = base.replace(year=base.year + count)
         else:
