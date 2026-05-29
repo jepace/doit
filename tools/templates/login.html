@@ -17,16 +17,18 @@
     h1 { font-size:24px;font-weight:700;margin-bottom:24px; }
     label { display:block;font-size:13px;font-weight:600;color:var(--text2);
             text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px; }
-    input { width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
-            border-radius:10px;padding:12px 14px;font-size:16px;margin-bottom:16px;
-            font-family:inherit;outline:none;-webkit-appearance:none; }
+    input[type="email"], input[type="password"] {
+      width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);
+      border-radius:10px;padding:12px 14px;font-size:16px;margin-bottom:16px;
+      font-family:inherit;outline:none;-webkit-appearance:none; }
     input:focus { border-color:var(--accent); }
     .btn { width:100%;background:var(--accent);color:#fff;border:none;border-radius:10px;
            padding:13px;font-size:16px;font-weight:600;cursor:pointer;margin-top:4px; }
     .error { background:#ff3b3022;color:var(--danger);border-radius:8px;
              padding:10px 14px;font-size:14px;margin-bottom:16px; }
-    .links { margin-top:16px; font-size:14px; color:var(--text2); text-align:center; }
-    .links a { color:var(--accent); text-decoration:none; }
+    .links { margin-top:16px;text-align:center;font-size:14px;color:var(--text2); }
+    .links a { color:var(--accent);text-decoration:none; }
+    .links a:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
@@ -34,7 +36,7 @@
     <h1>Sign In</h1>
     {% if error %}<div class="error">{{ error }}</div>{% endif %}
     <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="next" value="{{ next }}">
       <label for="email">Email</label>
       <input id="email" name="email" type="email" autocomplete="email" autofocus required>
@@ -43,7 +45,8 @@
       <button type="submit" class="btn">Sign In</button>
     </form>
     <div class="links">
-      <a href="/auth/forgot">Forgot password?</a> &nbsp;·&nbsp;
+      <a href="/auth/forgot">Forgot password?</a>
+      &nbsp;·&nbsp;
       <a href="/register">Create account</a>
     </div>
   </div>

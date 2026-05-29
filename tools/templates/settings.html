@@ -1,71 +1,180 @@
 {% extends "base.html" %}
 {% block title %}Settings — doit{% endblock %}
+
+{% block head %}
+<style>
+  .settings-wrap { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 24px; }
+
+  .section { background: var(--bg2); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .section h2 { font-size: 13px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: .06em; color: var(--text2); margin-bottom: 16px; }
+
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { display: block; font-size: 13px; font-weight: 600; color: var(--text2);
+                 margin-bottom: 6px; }
+  .field input, .field select {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 14px; font-size: 15px; font-family: inherit;
+    outline: none; -webkit-appearance: none; }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+
+  .radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .radio-group label {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 14px; cursor: pointer; font-size: 14px; font-weight: 500;
+    color: var(--text); transition: border-color .15s, background .15s; }
+  .radio-group input[type=radio] { display: none; }
+  .radio-group input[type=radio]:checked + span { color: var(--accent); font-weight: 700; }
+  .radio-group label:has(input:checked) { border-color: var(--accent); background: var(--bg2); }
+
+  .btn-save { background: var(--accent); color: #fff; border: none; border-radius: 10px;
+              padding: 10px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
+              margin-top: 6px; }
+  .btn-save:hover { background: var(--accent-dark); }
+
+  .error { background: #ff3b3022; color: var(--danger); border-radius: 8px;
+           padding: 10px 14px; font-size: 14px; margin-bottom: 14px; }
+  .success-banner { background: #34c75922; color: var(--success); border-radius: 8px;
+                    padding: 10px 14px; font-size: 14px; margin-bottom: 20px;
+                    border: 1px solid var(--success); }
+
+  .email-note { font-size: 12px; color: var(--text2); margin-top: 4px; }
+</style>
+{% endblock %}
+
 {% block body %}
 <div class="page">
-<div style="padding:24px;max-width:480px;margin:0 auto;">
-  <h1 style="font-size:22px;font-weight:700;margin-bottom:24px;">Settings</h1>
+<div class="settings-wrap">
+  <h1>Settings</h1>
 
-  {% if error %}<div style="background:#ff3b3022;color:#ff3b30;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:16px;">{{ error }}</div>{% endif %}
-  {% if success %}<div style="background:#34c75922;color:#34c759;border-radius:8px;padding:10px 14px;font-size:14px;margin-bottom:16px;">{{ success }}</div>{% endif %}
+  {% if success %}
+  <div class="success-banner">✓ Changes saved.</div>
+  {% endif %}
 
-  <section style="background:var(--bg2);border-radius:12px;padding:20px;margin-bottom:20px;">
-    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Preferences</h2>
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="action" value="prefs">
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Theme</label>
-        <select name="theme" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;">
-          <option value="system" {% if prefs.theme == 'system' %}selected{% endif %}>System</option>
-          <option value="light" {% if prefs.theme == 'light' %}selected{% endif %}>Light</option>
-          <option value="dark" {% if prefs.theme == 'dark' %}selected{% endif %}>Dark</option>
+  <!-- ── Appearance ─────────────────────────────────── -->
+  <form method="post">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="prefs">
+
+    <div class="section">
+      <h2>Appearance</h2>
+
+      <div class="field">
+        <label>Theme</label>
+        <div class="radio-group">
+          {% for val, lbl in [("system","System"), ("light","Light"), ("dark","Dark")] %}
+          <label>
+            <input type="radio" name="theme" value="{{ val }}"
+                   {% if prefs.theme == val %}checked{% endif %}
+                   onchange="previewTheme(this.value)">
+            <span>{{ lbl }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Font Size</label>
+        <div class="radio-group">
+          {% for val, lbl in [("small","Small"), ("medium","Medium"), ("large","Large")] %}
+          <label>
+            <input type="radio" name="font_size" value="{{ val }}"
+                   {% if prefs.font_size == val %}checked{% endif %}
+                   onchange="previewFontSize(this.value)">
+            <span>{{ lbl }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Task defaults ──────────────────────────────── -->
+    <div class="section">
+      <h2>Task List Defaults</h2>
+
+      <div class="field">
+        <label for="sort_col">Default Sort Column</label>
+        <select id="sort_col" name="sort_col">
+          {% for val, lbl in [("due","Due Date"), ("priority","Priority"),
+                               ("context","Context"), ("description","Task Name"),
+                               ("start","Start Date")] %}
+          <option value="{{ val }}" {% if prefs.sort_col == val %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
         </select>
       </div>
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Font Size</label>
-        <select name="font_size" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;">
-          <option value="small" {% if prefs.font_size == 'small' %}selected{% endif %}>Small</option>
-          <option value="medium" {% if prefs.font_size == 'medium' %}selected{% endif %}>Medium</option>
-          <option value="large" {% if prefs.font_size == 'large' %}selected{% endif %}>Large</option>
+
+      <div class="field">
+        <label for="sort_dir">Default Sort Direction</label>
+        <select id="sort_dir" name="sort_dir">
+          <option value="asc"  {% if prefs.sort_dir == "asc"  %}selected{% endif %}>Ascending</option>
+          <option value="desc" {% if prefs.sort_dir == "desc" %}selected{% endif %}>Descending</option>
         </select>
       </div>
-      <button type="submit" class="btn btn-primary btn-sm">Save Preferences</button>
-    </form>
-  </section>
+    </div>
 
-  <section style="background:var(--bg2);border-radius:12px;padding:20px;margin-bottom:20px;">
-    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Change Email</h2>
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="action" value="change-email">
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">New Email</label>
-        <input type="email" name="email" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
-      </div>
-      <button type="submit" class="btn btn-primary btn-sm">Change Email</button>
-    </form>
-  </section>
+    <button type="submit" class="btn-save">Save Preferences</button>
+  </form>
 
-  <section style="background:var(--bg2);border-radius:12px;padding:20px;">
-    <h2 style="font-size:16px;font-weight:700;margin-bottom:16px;">Change Password</h2>
-    <form method="post">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <input type="hidden" name="action" value="change-password">
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Current Password</label>
-        <input type="password" name="current_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+  <!-- ── Email address ─────────────────────────────── -->
+  <form method="post" style="margin-top:24px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="email">
+
+    <div class="section">
+      <h2>Email Address</h2>
+      {% if errors.email %}<div class="error">{{ errors.email }}</div>{% endif %}
+      <div class="field">
+        <label for="new_email">Current: <strong>{{ user.email }}</strong></label>
+        <input id="new_email" name="new_email" type="email"
+               placeholder="new@example.com" autocomplete="email">
+        <p class="email-note">Changing your email will require re-verification before you can log in again.</p>
       </div>
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">New Password</label>
-        <input type="password" name="new_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      <button type="submit" class="btn-save">Update Email</button>
+    </div>
+  </form>
+
+  <!-- ── Password ──────────────────────────────────── -->
+  <form method="post" style="margin-top:24px;">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="password">
+
+    <div class="section">
+      <h2>Change Password</h2>
+      {% if errors.password %}<div class="error">{{ errors.password }}</div>{% endif %}
+      <div class="field">
+        <label for="current_password">Current Password</label>
+        <input id="current_password" name="current_password" type="password"
+               autocomplete="current-password" required>
       </div>
-      <div style="margin-bottom:12px;">
-        <label style="display:block;font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;">Confirm New Password</label>
-        <input type="password" name="confirm_password" style="width:100%;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:15px;" required>
+      <div class="field">
+        <label for="new_password">New Password</label>
+        <input id="new_password" name="new_password" type="password"
+               autocomplete="new-password" minlength="8" required>
       </div>
-      <button type="submit" class="btn btn-primary btn-sm">Change Password</button>
-    </form>
-  </section>
+      <div class="field">
+        <label for="confirm_password">Confirm New Password</label>
+        <input id="confirm_password" name="confirm_password" type="password"
+               autocomplete="new-password" minlength="8" required>
+      </div>
+      <button type="submit" class="btn-save">Change Password</button>
+    </div>
+  </form>
+
 </div>
 </div>
+
+<script>
+function previewTheme(t) {
+  if (t === 'dark')       document.documentElement.setAttribute('data-theme', 'dark');
+  else if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else                    document.documentElement.removeAttribute('data-theme');
+}
+function previewFontSize(s) {
+  document.documentElement.setAttribute('data-fontsize', s || 'medium');
+}
+</script>
 {% endblock %}

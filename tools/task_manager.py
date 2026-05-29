@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-Task manager for data/{user_id}/tasks.md. Parses, filters, and updates tasks.
+Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
 """
 
 import re
+import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = REPO_ROOT / "data"
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Legacy single-file path (used by tests via monkeypatching)
-TASKS_FILE = DATA_DIR / "tasks.md"
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR  = REPO_ROOT / "data"
+
 
 
 def get_tasks_file(user_id: str) -> Path:
-    """Return the tasks file path for a given user_id."""
+    """Return the tasks.md path for the given user."""
     return DATA_DIR / user_id / "tasks.md"
 
 
@@ -157,13 +158,8 @@ class Task:
                 year += 1
             try:
                 next_due = base.replace(year=year, month=month)
-            except ValueError:  # day doesn't exist in target month — clamp to last day
-                overflow_month = month + 1
-                overflow_year  = year
-                if overflow_month > 12:
-                    overflow_month = 1
-                    overflow_year += 1
-                next_due = base.replace(year=overflow_year, month=overflow_month, day=1) - timedelta(days=1)
+            except ValueError:  # Day doesn't exist in target month
+                next_due = base.replace(year=year, month=month, day=1) - timedelta(days=1)
         elif unit == 'y':
             next_due = base.replace(year=base.year + count)
         else:
@@ -183,14 +179,8 @@ class Task:
         return next_task
 
 
-def read_tasks(tasks_file: Path = None) -> list:
-    """Read all tasks from a tasks.md file.
-
-    If tasks_file is None, uses the legacy TASKS_FILE global (for backward compat).
-    """
-    if tasks_file is None:
-        tasks_file = TASKS_FILE
-
+def read_tasks(tasks_file: Path):
+    """Read all tasks from the given tasks file."""
     if not tasks_file.exists():
         return []
 
@@ -229,14 +219,8 @@ def read_tasks(tasks_file: Path = None) -> list:
     return tasks
 
 
-def write_tasks(tasks: list, tasks_file: Path = None) -> None:
-    """Write updated tasks back to a tasks.md file.
-
-    If tasks_file is None, uses the legacy TASKS_FILE global (for backward compat).
-    """
-    if tasks_file is None:
-        tasks_file = TASKS_FILE
-
+def write_tasks(tasks, tasks_file: Path):
+    """Write updated tasks back to the given tasks file."""
     if not tasks_file.exists():
         return
 
@@ -275,11 +259,11 @@ def write_tasks(tasks: list, tasks_file: Path = None) -> None:
     tasks_file.write_text('\n'.join(new_lines), encoding='utf-8')
 
 
-def get_all_contexts(tasks_file: Path = None):
+def get_all_contexts(tasks_file: Path):
     return sorted(set(t.context for t in read_tasks(tasks_file) if t.context))
 
-def get_all_projects(tasks_file: Path = None):
+def get_all_projects(tasks_file: Path):
     return sorted(set(t.project for t in read_tasks(tasks_file) if t.project))
 
-def get_all_sections(tasks_file: Path = None):
+def get_all_sections(tasks_file: Path):
     return sorted(set(t.section for t in read_tasks(tasks_file) if t.section))

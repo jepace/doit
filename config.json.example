@@ -1,8 +1,18 @@
 {
   "server": {
-    "host":   "127.0.0.1",
-    "port":   8080,
-    "https":  false,
-    "secret": ""
+    "host":     "127.0.0.1",
+    "port":     8080,
+    "https":    false,
+    "base_url": "http://localhost:8080",
+    "secret":   ""
+  },
+  "email": {
+    "resend_api_key": "",
+    "from_address":  "doit@yourdomain.com",
+    "smtp_host":     "",
+    "smtp_port":     587,
+    "smtp_user":     "",
+    "smtp_password": "",
+    "smtp_tls":      true
   }
 }

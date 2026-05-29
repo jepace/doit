@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 """
-doit — Multi-user task manager web server
+doit — Task manager web server (multi-user)
+
+Usage:
+  cp config.json.example config.json   # fill in settings
+  python3 tools/serve.py               # http://127.0.0.1:8080
 """
 
 import functools
-import json
 import os
 import re
 import secrets
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 
 try:
-    from flask import (Flask, abort, g, redirect, render_template,
+    from flask import (Flask, g, abort, flash, redirect, render_template,
                        request, session, url_for)
 except ImportError:
     sys.exit("Error: flask not installed. Run: pip install flask")
@@ -23,16 +25,14 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
-                           get_all_projects, get_tasks_file)
-from user_store import UserStore
+                          get_all_projects, get_tasks_file, DATA_DIR)
+from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = REPO_ROOT / "data"
 
 app = Flask(__name__, template_folder="templates")
 
-# Secret key
 _secret_file = DATA_DIR / ".secret"
 _secret = cfg_get("server", "secret")
 if _secret:
@@ -40,8 +40,8 @@ if _secret:
 elif _secret_file.exists():
     app.secret_key = _secret_file.read_text().strip()
 else:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
     _key = os.urandom(24).hex()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     _secret_file.write_text(_key)
     app.secret_key = _key
 
@@ -51,8 +51,9 @@ app.config.update(
     SESSION_COOKIE_SECURE=cfg_bool("server", "https"),
 )
 
+
 # ---------------------------------------------------------------------------
-# CSRF
+# CSRF helpers
 # ---------------------------------------------------------------------------
 
 def generate_csrf() -> str:
@@ -61,19 +62,22 @@ def generate_csrf() -> str:
     return session["csrf_token"]
 
 
-def validate_csrf(token: str) -> bool:
-    return token and token == session.get("csrf_token")
+def validate_csrf() -> bool:
+    form_token = request.form.get("_csrf_token", "")
+    session_token = session.get("csrf_token", "")
+    if not form_token or not session_token:
+        return False
+    return secrets.compare_digest(form_token, session_token)
 
 
 @app.before_request
-def _enforce_csrf():
+def csrf_protect():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    # Skip JSON API endpoints — they rely on same-origin via Content-Type
+    # Skip CSRF check for JSON API endpoints (they use session auth + same-origin)
     if request.is_json:
         return
-    token = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
-    if not validate_csrf(token):
+    if not validate_csrf():
         abort(403)
 
 
@@ -81,30 +85,38 @@ def _enforce_csrf():
 # Rate limiting
 # ---------------------------------------------------------------------------
 
-_rate_buckets: dict = defaultdict(list)
+_rate_limit: dict[str, list[float]] = {}
 
 
 def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> bool:
-    """Return True if allowed, False if rate limited."""
+    """Returns True if request is allowed, False if over limit."""
     now = time.time()
-    bucket = _rate_buckets[key]
-    # Remove expired
-    _rate_buckets[key] = [t for t in bucket if now - t < window_seconds]
-    if len(_rate_buckets[key]) >= max_requests:
+    timestamps = _rate_limit.get(key, [])
+    # Prune old timestamps
+    timestamps = [t for t in timestamps if now - t < window_seconds]
+    if len(timestamps) >= max_requests:
+        _rate_limit[key] = timestamps
         return False
-    _rate_buckets[key].append(now)
+    timestamps.append(now)
+    _rate_limit[key] = timestamps
     return True
 
 
 def _ip() -> str:
-    forwarded = request.headers.get("X-Forwarded-For", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.remote_addr or "unknown"
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+
+
+def _safe_next(url: str) -> str:
+    """Return url only if it's a safe relative path, otherwise /tasks."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme or parsed.netloc:
+        return url_for("tasks")
+    return url or url_for("tasks")
 
 
 # ---------------------------------------------------------------------------
-# User loading
+# User context
 # ---------------------------------------------------------------------------
 
 @app.before_request
@@ -116,35 +128,28 @@ def load_user():
         if user and not user.get("suspended"):
             g.user = user
         else:
+            # User deleted or suspended — clear session
             session.clear()
 
 
 @app.context_processor
 def inject_globals():
-    path = request.path
-    if path.startswith("/tasks"):
-        active = "tasks"
-    elif path.startswith("/settings"):
-        active = "settings"
-    elif path.startswith("/admin"):
-        active = "admin"
-    else:
-        active = None
-    return {
-        "current_user": g.user,
-        "csrf_token": generate_csrf(),
-        "active": active,
-    }
+    csrf_token = generate_csrf()
+    path   = request.path
+    active = ("settings" if path.startswith("/settings")
+              else "admin"  if path.startswith("/admin")
+              else "tasks")
+    return {"current_user": g.get("user"), "csrf_token": csrf_token, "active": active}
 
 
 # ---------------------------------------------------------------------------
-# Decorators
+# Auth decorators
 # ---------------------------------------------------------------------------
 
 def require_login(f):
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        if not g.user:
+        if not g.get("user"):
             return redirect(url_for("auth_login", next=request.full_path.rstrip("?")))
         return f(*args, **kwargs)
     return decorated
@@ -153,7 +158,7 @@ def require_login(f):
 def require_admin(f):
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        if not g.user:
+        if not g.get("user"):
             return redirect(url_for("auth_login"))
         if not g.user.get("admin"):
             abort(403)
@@ -162,24 +167,7 @@ def require_admin(f):
 
 
 # ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _safe_next(url: str) -> str:
-    """Reject absolute URLs to prevent open redirect."""
-    if not url:
-        return url_for("tasks")
-    if url.startswith(("http://", "https://", "//")):
-        return url_for("tasks")
-    return url
-
-
-def _base_url() -> str:
-    return request.host_url.rstrip("/")
-
-
-# ---------------------------------------------------------------------------
-# Index
+# Auth routes
 # ---------------------------------------------------------------------------
 
 @app.route("/")
@@ -187,26 +175,21 @@ def index():
     return redirect(url_for("tasks"))
 
 
-# ---------------------------------------------------------------------------
-# Auth routes
-# ---------------------------------------------------------------------------
-
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if g.user:
+    if g.get("user"):
         return redirect(url_for("tasks"))
-
     error = None
     if request.method == "POST":
-        if not _check_rate_limit(f"register:{_ip()}", 5, 3600):
+        ip = _ip()
+        if not _check_rate_limit(f"register:{ip}", 5, 3600):
             error = "Too many registration attempts. Please try again later."
         else:
-            email = request.form.get("email", "").strip().lower()
+            email    = request.form.get("email", "").strip()
             password = request.form.get("password", "")
-            confirm = request.form.get("confirm", "")
-
-            if not email or "@" not in email:
-                error = "A valid email address is required."
+            confirm  = request.form.get("confirm", "")
+            if not email:
+                error = "Email is required."
             elif not password:
                 error = "Password is required."
             elif len(password) < 8:
@@ -215,70 +198,78 @@ def register():
                 error = "Passwords do not match."
             else:
                 try:
-                    profile = UserStore.create_user(email, password)
-                    token = UserStore.create_verify_token(profile["id"])
-                    send_verification_email(email, token, _base_url())
-                    return redirect(url_for("auth_verify_pending"))
-                except ValueError as e:
-                    error = str(e)
-
+                    user = UserStore.create_user(email, password)
+                    token = UserStore.create_verify_token(user["id"])
+                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+                    send_verification_email(email, token, base_url)
+                    session["pending_email"] = email
+                    return redirect(url_for("verify_pending"))
+                except ValueError as exc:
+                    error = str(exc)
     return render_template("register.html", error=error)
 
 
 @app.route("/auth/verify/pending")
-def auth_verify_pending():
-    return render_template("verify_pending.html")
+def verify_pending():
+    email = session.get("pending_email") or request.args.get("email", "")
+    return render_template("verify_pending.html", email=email)
 
 
 @app.route("/auth/verify/<token>")
 def auth_verify(token):
     user = UserStore.consume_verify_token(token)
-    if not user:
-        return render_template("verify_pending.html",
-                               error="Verification link is invalid or expired.")
+    if user is None:
+        return render_template("verify_pending.html", email="",
+                               error="This verification link is invalid or has expired.")
+    session.pop("pending_email", None)
     session["user_id"] = user["id"]
+    session["csrf_token"] = secrets.token_hex(32)
+    flash("Your email has been verified. Welcome!")
     return redirect(url_for("tasks"))
 
 
 @app.route("/auth/resend-verify", methods=["POST"])
 def auth_resend_verify():
-    email = request.form.get("email", "").strip().lower()
-    user = UserStore.get_by_email(email) if email else None
-    if user and not user.get("verified"):
-        token = UserStore.create_verify_token(user["id"])
-        send_verification_email(email, token, _base_url())
-    return redirect(url_for("auth_verify_pending"))
+    email = request.form.get("email", "").strip() or session.get("pending_email", "")
+    if email:
+        user = UserStore.get_by_email(email)
+        if user and not user.get("verified"):
+            token = UserStore.create_verify_token(user["id"])
+            base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+            send_verification_email(email, token, base_url)
+    session["pending_email"] = email
+    return redirect(url_for("verify_pending"))
 
 
 @app.route("/auth/login", methods=["GET", "POST"])
 def auth_login():
-    if g.user:
+    if g.get("user"):
         return redirect(url_for("tasks"))
-
     error = None
     if request.method == "POST":
-        if not _check_rate_limit(f"login:{_ip()}", 10, 300):
-            error = "Too many login attempts. Please try again in a few minutes."
+        ip = _ip()
+        if not _check_rate_limit(f"login:{ip}", 10, 300):
+            error = "Too many login attempts. Please try again later."
         else:
-            email = request.form.get("email", "").strip().lower()
+            email    = request.form.get("email", "").strip()
             password = request.form.get("password", "")
-            user = UserStore.authenticate(email, password)
+            user, err = UserStore.authenticate(email, password)
             if user:
-                if not user.get("verified"):
-                    # Resend verification
-                    token = UserStore.create_verify_token(user["id"])
-                    send_verification_email(user["email"], token, _base_url())
-                    return redirect(url_for("auth_verify_pending"))
-                if user.get("suspended"):
-                    error = "This account has been suspended."
-                else:
-                    session["user_id"] = user["id"]
-                    next_url = _safe_next(
-                        request.form.get("next") or request.args.get("next"))
-                    return redirect(next_url)
-            else:
-                error = "Incorrect email or password."
-
+                session.clear()
+                session["user_id"] = user["id"]
+                session["csrf_token"] = secrets.token_hex(32)
+                next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
+                return redirect(next_url)
+            elif err == "Please verify your email address before signing in.":
+                # Resend verification and show pending page
+                user_obj = UserStore.get_by_email(email)
+                if user_obj:
+                    token = UserStore.create_verify_token(user_obj["id"])
+                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+                    send_verification_email(email, token, base_url)
+                    session["pending_email"] = email
+                    return redirect(url_for("verify_pending"))
+            error = err
     return render_template("login.html", error=error,
                            next=request.args.get("next", ""))
 
@@ -291,154 +282,40 @@ def auth_logout():
 
 @app.route("/auth/forgot", methods=["GET", "POST"])
 def auth_forgot():
-    success = False
+    submitted = False
     if request.method == "POST":
-        if not _check_rate_limit(f"forgot:{_ip()}", 3, 3600):
-            pass  # still show success — no enumeration
-        else:
-            email = request.form.get("email", "").strip().lower()
-            user = UserStore.get_by_email(email) if email else None
-            if user:
-                token = UserStore.create_reset_token(user["id"])
-                send_reset_email(email, token, _base_url())
-        success = True
-
-    return render_template("forgot_password.html", success=success)
+        ip = _ip()
+        if _check_rate_limit(f"forgot:{ip}", 3, 3600):
+            email = request.form.get("email", "").strip()
+            if email:
+                token, user = UserStore.create_reset_token(email)
+                if token and user:
+                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+                    send_reset_email(email, token, base_url)
+        # Always show success to avoid enumeration
+        submitted = True
+    return render_template("forgot_password.html", submitted=submitted)
 
 
 @app.route("/auth/reset/<token>", methods=["GET", "POST"])
 def auth_reset(token):
-    user = UserStore.consume_reset_token(token)
-    if not user:
-        return render_template("reset_password.html",
-                               error="Reset link is invalid or expired.", token=token)
-
     error = None
     if request.method == "POST":
         password = request.form.get("password", "")
-        confirm = request.form.get("confirm", "")
-        if not password or len(password) < 8:
+        confirm  = request.form.get("confirm", "")
+        if not password:
+            error = "Password is required."
+        elif len(password) < 8:
             error = "Password must be at least 8 characters."
         elif password != confirm:
             error = "Passwords do not match."
         else:
-            UserStore.change_password(user["id"], password)
-            return redirect(url_for("auth_login"))
-
-    return render_template("reset_password.html", error=error, token=token)
-
-
-# ---------------------------------------------------------------------------
-# Settings
-# ---------------------------------------------------------------------------
-
-@app.route("/settings", methods=["GET", "POST"])
-@require_login
-def settings():
-    error = None
-    success = None
-
-    if request.method == "POST":
-        action = request.form.get("action", "")
-
-        if action == "prefs":
-            prefs = UserStore.get_prefs(g.user["id"])
-            prefs["theme"] = request.form.get("theme", prefs["theme"])
-            prefs["font_size"] = request.form.get("font_size", prefs["font_size"])
-            prefs["sort_col"] = request.form.get("sort_col", prefs["sort_col"])
-            prefs["sort_dir"] = request.form.get("sort_dir", prefs["sort_dir"])
-            UserStore.save_prefs(g.user["id"], prefs)
-            success = "Preferences saved."
-
-        elif action == "change-email":
-            new_email = request.form.get("email", "").strip().lower()
-            if not new_email or "@" not in new_email:
-                error = "A valid email address is required."
-            else:
-                try:
-                    UserStore.change_email(g.user["id"], new_email)
-                    token = UserStore.create_verify_token(g.user["id"])
-                    send_verification_email(new_email, token, _base_url())
-                    session.clear()
-                    return redirect(url_for("auth_verify_pending"))
-                except ValueError as e:
-                    error = str(e)
-
-        elif action == "change-password":
-            current = request.form.get("current_password", "")
-            new_pw = request.form.get("new_password", "")
-            confirm = request.form.get("confirm_password", "")
-            user_check = UserStore.authenticate(g.user["email"], current)
-            if not user_check:
-                error = "Current password is incorrect."
-            elif len(new_pw) < 8:
-                error = "New password must be at least 8 characters."
-            elif new_pw != confirm:
-                error = "Passwords do not match."
-            else:
-                UserStore.change_password(g.user["id"], new_pw)
-                success = "Password changed."
-
-    prefs = UserStore.get_prefs(g.user["id"])
-    return render_template("settings.html", prefs=prefs, error=error, success=success)
-
-
-# ---------------------------------------------------------------------------
-# Admin
-# ---------------------------------------------------------------------------
-
-@app.route("/admin")
-@require_admin
-def admin():
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users")
-@require_admin
-def admin_users():
-    users = UserStore.list_users()
-    for u in users:
-        u["_task_count"] = UserStore.get_task_count(u["id"])
-    return render_template("admin.html", users=users)
-
-
-@app.route("/admin/users/<user_id>/suspend", methods=["POST"])
-@require_admin
-def admin_suspend(user_id):
-    user = UserStore.get_user(user_id)
-    if user:
-        UserStore.suspend_user(user_id, not user.get("suspended"))
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users/<user_id>/delete", methods=["POST"])
-@require_admin
-def admin_delete(user_id):
-    if user_id == g.user["id"]:
-        abort(400)
-    if request.args.get("confirm") != "yes":
-        abort(400)
-    UserStore.delete_user(user_id)
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users/<user_id>/toggle-admin", methods=["POST"])
-@require_admin
-def admin_toggle_admin(user_id):
-    if user_id == g.user["id"]:
-        abort(400)
-    UserStore.toggle_admin(user_id)
-    return redirect(url_for("admin_users"))
-
-
-@app.route("/admin/users/<user_id>/resend-verify", methods=["POST"])
-@require_admin
-def admin_resend_verify(user_id):
-    user = UserStore.get_user(user_id)
-    if user and not user.get("verified"):
-        token = UserStore.create_verify_token(user_id)
-        send_verification_email(user["email"], token, _base_url())
-    return redirect(url_for("admin_users"))
+            ok = UserStore.consume_reset_token(token, password)
+            if ok:
+                flash("Password reset successfully. Please sign in.")
+                return redirect(url_for("auth_login"))
+            error = "This reset link is invalid or has expired."
+    return render_template("reset_password.html", token=token, error=error)
 
 
 # ---------------------------------------------------------------------------
@@ -502,25 +379,24 @@ def tasks():
 @app.route("/tasks/toggle", methods=["POST"])
 @require_login
 def tasks_toggle():
-    data = request.get_json(silent=True) or {}
-    line = data.get("line")
+    data   = request.get_json(silent=True) or {}
+    line   = data.get("line")
     action = data.get("action")
     if line is None or action not in ("complete", "reopen"):
         return {"error": "bad request"}, 400
-    with UserStore.get_user_lock(g.user["id"]):
-        ok = _toggle_task(int(line), action)
-    return {"ok": ok}
+    with get_user_lock(g.user["id"]):
+        return {"ok": _toggle_task(int(line), action)}
 
 
 @app.route("/tasks/add", methods=["POST"])
 @require_login
 def tasks_add():
-    data = request.get_json(silent=True) or {}
-    text = (data.get("text") or "").strip()
+    data    = request.get_json(silent=True) or {}
+    text    = (data.get("text")    or "").strip()
     section = (data.get("section") or "Inbox").strip()
     if not text:
         return {"error": "Empty task"}, 400
-    with UserStore.get_user_lock(g.user["id"]):
+    with get_user_lock(g.user["id"]):
         _add_task(text, section)
     return {"ok": True}
 
@@ -528,21 +404,21 @@ def tasks_add():
 @app.route("/tasks/update", methods=["POST"])
 @require_login
 def tasks_update():
-    data = request.get_json(silent=True) or {}
+    data    = request.get_json(silent=True) or {}
     task_id = data.get("task_id")
-    field = data.get("field")
-    value = data.get("value", "").strip()
+    field   = data.get("field")
+    value   = data.get("value", "").strip()
 
     if task_id is None or field is None:
         return {"error": "missing task_id or field"}, 400
 
-    tasks_file = _get_tasks_file()
-    with UserStore.get_user_lock(g.user["id"]):
+    with get_user_lock(g.user["id"]):
+        tasks_file = _get_tasks_file()
         tasks_list = read_tasks(tasks_file)
         if not (0 <= task_id < len(tasks_list)):
             return {"error": "task not found"}, 404
 
-        task = tasks_list[task_id]
+        task      = tasks_list[task_id]
         next_task = None
 
         if field == "description":
@@ -573,7 +449,7 @@ def tasks_update():
         write_tasks(tasks_list, tasks_file)
 
         if next_task:
-            next_line = next_task.to_line()
+            next_line  = next_task.to_line()
             next_notes = next_task.raw_notes.strip()
             with open(tasks_file, "a", encoding="utf-8") as f:
                 f.write("\n" + next_line)
@@ -585,10 +461,10 @@ def tasks_update():
     if next_task:
         result["next_task"] = {
             "description": next_task.description,
-            "due": next_task.due,
-            "priority": next_task.priority,
-            "context": next_task.context,
-            "recurrence": next_task.recurrence,
+            "due":         next_task.due,
+            "priority":    next_task.priority,
+            "context":     next_task.context,
+            "recurrence":  next_task.recurrence,
         }
     return result
 
@@ -596,16 +472,16 @@ def tasks_update():
 @app.route("/tasks/bulk-update", methods=["POST"])
 @require_login
 def tasks_bulk_update():
-    data = request.get_json(silent=True) or {}
-    action = data.get("action")
+    data     = request.get_json(silent=True) or {}
+    action   = data.get("action")
     task_ids = data.get("task_ids", [])
-    value = data.get("value", "").strip()
+    value    = data.get("value", "").strip()
 
     if action is None:
         return {"error": "missing action"}, 400
 
-    tasks_file = _get_tasks_file()
-    with UserStore.get_user_lock(g.user["id"]):
+    with get_user_lock(g.user["id"]):
+        tasks_file = _get_tasks_file()
         tasks_list = read_tasks(tasks_file)
 
         for task_id in task_ids:
@@ -627,8 +503,119 @@ def tasks_bulk_update():
                 return {"error": "unknown action"}, 400
 
         write_tasks(tasks_list, tasks_file)
-
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin routes
+# ---------------------------------------------------------------------------
+
+@app.route("/settings", methods=["GET", "POST"])
+@require_login
+def settings():
+    user   = g.user
+    errors = {}
+    success = request.args.get("saved") == "1"
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "prefs":
+            UserStore.save_prefs(
+                user["id"],
+                theme     = request.form.get("theme",    "system"),
+                font_size = request.form.get("font_size","medium"),
+                sort_col  = request.form.get("sort_col", "due"),
+                sort_dir  = request.form.get("sort_dir", "asc"),
+            )
+            return redirect(url_for("settings", saved="1"))
+
+        elif action == "email":
+            new_email = request.form.get("new_email", "").strip().lower()
+            try:
+                UserStore.change_email(user["id"], new_email)
+                token    = UserStore.create_verify_token(user["id"])
+                base_url = cfg_get("server", "base_url",
+                                   f"http://127.0.0.1:{cfg_int('server','port',8080)}")
+                send_verification_email(new_email, token, base_url)
+                session.clear()
+                return redirect(url_for("verify_pending", email=new_email))
+            except ValueError as e:
+                errors["email"] = str(e)
+
+        elif action == "password":
+            current_pw = request.form.get("current_password", "")
+            new_pw     = request.form.get("new_password", "")
+            confirm_pw = request.form.get("confirm_password", "")
+            if new_pw != confirm_pw:
+                errors["password"] = "New passwords do not match."
+            else:
+                ok, msg = UserStore.change_password(user["id"], current_pw, new_pw)
+                if ok:
+                    return redirect(url_for("settings", saved="1"))
+                else:
+                    errors["password"] = msg
+
+    prefs = UserStore.get_prefs(user["id"])
+    return render_template("settings.html", user=user, prefs=prefs,
+                           errors=errors, success=success)
+
+
+@app.route("/admin")
+@require_admin
+def admin_index():
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users")
+@require_admin
+def admin_users():
+    users = UserStore.list_users()
+    # Add task count to each user dict for display
+    for u in users:
+        u["_task_count"] = UserStore.get_task_count(u["id"])
+    users.sort(key=lambda u: u.get("created_at", ""))
+    return render_template("admin.html", users=users)
+
+
+@app.route("/admin/users/<user_id>/suspend", methods=["POST"])
+@require_admin
+def admin_suspend(user_id):
+    user = UserStore.get_user(user_id)
+    if user:
+        UserStore.suspend_user(user_id, not user.get("suspended", False))
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<user_id>/delete", methods=["POST"])
+@require_admin
+def admin_delete(user_id):
+    if request.args.get("confirm") == "yes":
+        # Cannot delete self
+        if user_id != g.user["id"]:
+            UserStore.delete_user(user_id)
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<user_id>/toggle-admin", methods=["POST"])
+@require_admin
+def admin_toggle_admin(user_id):
+    # Cannot demote self
+    if user_id == g.user["id"]:
+        return redirect(url_for("admin_users"))
+    UserStore.toggle_admin(user_id)
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<user_id>/resend-verify", methods=["POST"])
+@require_admin
+def admin_resend_verify(user_id):
+    user = UserStore.get_user(user_id)
+    if user and not user.get("verified"):
+        token = UserStore.create_verify_token(user_id)
+        base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+        send_verification_email(user["email"], token, base_url)
+    return redirect(url_for("admin_users"))
 
 
 # ---------------------------------------------------------------------------
@@ -636,8 +623,15 @@ def tasks_bulk_update():
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    host = cfg_get("server", "host", "127.0.0.1")
-    port = cfg_int("server", "port", 8080)
+    host  = cfg_get("server", "host", "127.0.0.1")
+    port  = cfg_int("server", "port", 8080)
     debug = cfg_bool("server", "debug", False)
+
+    # Ensure data dir exists
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not UserStore.list_users():
+        print(f"\n  No users exist yet. Register at: http://{host}:{port}/register\n")
+
     print(f"Starting doit at http://{host}:{port}")
     app.run(host=host, port=port, debug=debug)
