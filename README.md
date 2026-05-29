@@ -1,25 +1,26 @@
 # doit
 
-A lightweight personal task manager. Tasks live in `wiki/tasks.md` as plain markdown with inline tags.
+A lightweight personal task manager. Tasks live in `data/tasks.md` as plain markdown with inline tags.
 
 ## Setup
 
 ```sh
-pip install flask
+pip install -r requirements.txt
 cp config.json.example config.json
+# edit config.json — set base_url, resend_api_key, and generate a secret key
 python3 src/serve.py
 ```
 
-Open `http://127.0.0.1:8080` — you'll be prompted to set a password on first run.
+Open `http://127.0.0.1:8080` — register an account on first run.
 
 ## Task format
 
 ```
-- [ ] Task description #p:high #due:2026-05-01 #ctx:work #proj:project-name
+- [ ] Task description #p:high #due:2026-05-01 #ctx:work #proj:project-name #rep:1w
   Optional note line
 ```
 
-Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:work`, `#proj:name`, `#rep:1w`, `#start:YYYY-MM-DD`
+Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:context`, `#proj:name`, `#rep:1d/1w/2w/1m/1y`, `#start:YYYY-MM-DD`, `#star`, `#done:YYYY-MM-DD`
 
 ## CLI
 
