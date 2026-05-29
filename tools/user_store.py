@@ -41,6 +41,11 @@ def _get_lock(key: str) -> threading.Lock:
         return _locks[key]
 
 
+def get_user_lock(user_id: str) -> threading.Lock:
+    """Public: per-user lock, shared across profile and tasks file writes."""
+    return _get_lock(user_id)
+
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
@@ -368,13 +373,15 @@ class UserStore:
 
     @classmethod
     def delete_user(cls, user_id: str) -> None:
-        p = _read_json(_profile_path(user_id))
-        email = p.get("email") if p else None
-        with _get_lock(user_id):
-            if _user_dir(user_id).exists():
-                shutil.rmtree(_user_dir(user_id))
-        if email:
-            with _get_lock("email_index"):
+        # Acquire email_index first — same ordering as change_email — to prevent deadlock.
+        with _get_lock("email_index"):
+            with _get_lock(user_id):
+                # Read profile inside the lock so we see the current email.
+                p = _read_json(_profile_path(user_id))
+                email = p.get("email") if p else None
+                if _user_dir(user_id).exists():
+                    shutil.rmtree(_user_dir(user_id))
+            if email:
                 index = _load_email_index()
                 index.pop(email, None)
                 _save_email_index(index)

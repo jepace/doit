@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
                           get_all_projects, get_tasks_file, DATA_DIR)
-from user_store import UserStore
+from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -384,7 +384,8 @@ def tasks_toggle():
     action = data.get("action")
     if line is None or action not in ("complete", "reopen"):
         return {"error": "bad request"}, 400
-    return {"ok": _toggle_task(int(line), action)}
+    with get_user_lock(g.user["id"]):
+        return {"ok": _toggle_task(int(line), action)}
 
 
 @app.route("/tasks/add", methods=["POST"])
@@ -395,7 +396,8 @@ def tasks_add():
     section = (data.get("section") or "Inbox").strip()
     if not text:
         return {"error": "Empty task"}, 400
-    _add_task(text, section)
+    with get_user_lock(g.user["id"]):
+        _add_task(text, section)
     return {"ok": True}
 
 
@@ -410,49 +412,50 @@ def tasks_update():
     if task_id is None or field is None:
         return {"error": "missing task_id or field"}, 400
 
-    tasks_file = _get_tasks_file()
-    tasks_list = read_tasks(tasks_file)
-    if not (0 <= task_id < len(tasks_list)):
-        return {"error": "task not found"}, 404
+    with get_user_lock(g.user["id"]):
+        tasks_file = _get_tasks_file()
+        tasks_list = read_tasks(tasks_file)
+        if not (0 <= task_id < len(tasks_list)):
+            return {"error": "task not found"}, 404
 
-    task      = tasks_list[task_id]
-    next_task = None
+        task      = tasks_list[task_id]
+        next_task = None
 
-    if field == "description":
-        task.description = value
-    elif field == "context":
-        task.set_context(value if value else None)
-    elif field == "due":
-        task.set_due(value if value else None)
-    elif field == "priority":
-        task.set_priority(value if value else None)
-    elif field == "project":
-        task.set_project(value if value else None)
-    elif field == "recurrence":
-        task.set_recurrence(value if value else None)
-    elif field == "start":
-        task.set_start(value if value else None)
-    elif field == "notes":
-        task.set_notes(value)
-    elif field == "complete":
-        if value == "true":
-            task.complete_task()
-            next_task = task.get_next_recurrence()
+        if field == "description":
+            task.description = value
+        elif field == "context":
+            task.set_context(value if value else None)
+        elif field == "due":
+            task.set_due(value if value else None)
+        elif field == "priority":
+            task.set_priority(value if value else None)
+        elif field == "project":
+            task.set_project(value if value else None)
+        elif field == "recurrence":
+            task.set_recurrence(value if value else None)
+        elif field == "start":
+            task.set_start(value if value else None)
+        elif field == "notes":
+            task.set_notes(value)
+        elif field == "complete":
+            if value == "true":
+                task.complete_task()
+                next_task = task.get_next_recurrence()
+            else:
+                task.reopen_task()
         else:
-            task.reopen_task()
-    else:
-        return {"error": "unknown field"}, 400
+            return {"error": "unknown field"}, 400
 
-    write_tasks(tasks_list, tasks_file)
+        write_tasks(tasks_list, tasks_file)
 
-    if next_task:
-        next_line  = next_task.to_line()
-        next_notes = next_task.raw_notes.strip()
-        with open(tasks_file, "a", encoding="utf-8") as f:
-            f.write("\n" + next_line)
-            if next_notes:
-                for note_line in next_notes.split("\n"):
-                    f.write("\n" + note_line)
+        if next_task:
+            next_line  = next_task.to_line()
+            next_notes = next_task.raw_notes.strip()
+            with open(tasks_file, "a", encoding="utf-8") as f:
+                f.write("\n" + next_line)
+                if next_notes:
+                    for note_line in next_notes.split("\n"):
+                        f.write("\n" + note_line)
 
     result = {"ok": True}
     if next_task:
@@ -477,28 +480,29 @@ def tasks_bulk_update():
     if action is None:
         return {"error": "missing action"}, 400
 
-    tasks_file = _get_tasks_file()
-    tasks_list = read_tasks(tasks_file)
+    with get_user_lock(g.user["id"]):
+        tasks_file = _get_tasks_file()
+        tasks_list = read_tasks(tasks_file)
 
-    for task_id in task_ids:
-        if not (0 <= task_id < len(tasks_list)):
-            continue
-        task = tasks_list[task_id]
-        if action == "set-priority":
-            task.set_priority(value if value else None)
-        elif action == "set-context":
-            task.set_context(value if value else None)
-        elif action == "set-due":
-            task.set_due(value if value else None)
-        elif action == "set-project":
-            task.set_project(value if value else None)
-        elif action == "delete":
-            task.description = "[DELETED]"
-            task.complete = True
-        else:
-            return {"error": "unknown action"}, 400
+        for task_id in task_ids:
+            if not (0 <= task_id < len(tasks_list)):
+                continue
+            task = tasks_list[task_id]
+            if action == "set-priority":
+                task.set_priority(value if value else None)
+            elif action == "set-context":
+                task.set_context(value if value else None)
+            elif action == "set-due":
+                task.set_due(value if value else None)
+            elif action == "set-project":
+                task.set_project(value if value else None)
+            elif action == "delete":
+                task.description = "[DELETED]"
+                task.complete = True
+            else:
+                return {"error": "unknown action"}, 400
 
-    write_tasks(tasks_list, tasks_file)
+        write_tasks(tasks_list, tasks_file)
     return {"ok": True}
 
 
