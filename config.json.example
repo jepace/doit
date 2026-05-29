@@ -1,32 +1,8 @@
 {
-  "admin": {
-    "email": "you@example.com",
-    "password": "change-this-password"
-  },
   "server": {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "https": false,
-    "base_url": "http://localhost:8080",
+    "host":   "127.0.0.1",
+    "port":   8080,
+    "https":  false,
     "secret": ""
-  },
-  "llm": {
-    "provider": "gemini",
-    "api_key": "your-gemini-api-key",
-    "model": "gemini-2.5-flash-lite",
-    "api_base": "",
-    "max_retries": 6,
-    "retry_base_delay": 5,
-    "retry_poll_interval": 300,
-    "max_rpm": 15,
-    "inter_request_delay": 5
-  },
-  "email": {
-    "resend_api_key": "",
-    "from_address": "wiki@yourdomain.com",
-    "daily_tasks_hour": -1
-  },
-  "api": {
-    "push_key": "generate with: python3 -c \"import secrets; print(secrets.token_hex(32))\""
   }
 }

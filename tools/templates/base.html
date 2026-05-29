@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>{% block title %}Lobotomy{% endblock %}</title>
+  <title>{% block title %}doit{% endblock %}</title>
   <style>
     :root {
       --bg:          #ffffff;
@@ -18,47 +18,30 @@
       --border:      #d1d1d6;
       --danger:      #ff3b30;
       --success:     #34c759;
-      --warn-bg:     #fff3cd;
-      --user-bg:     #007aff;
-      --user-fg:     #ffffff;
-      --ai-bg:       #f0f0f5;
-      --ai-fg:       #1c1c1e;
-      --tool-bg:     #f8f8fa;
       --nav-h:       56px;
       --safe-bottom: env(safe-area-inset-bottom, 0px);
       --safe-top:    env(safe-area-inset-top, 0px);
     }
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
-        --bg:        #000000;
-        --bg2:       #1c1c1e;
-        --bg3:       #2c2c2e;
-        --text:      #f2f2f7;
-        --text2:     #8e8e93;
-        --accent:    #0a84ff;
-        --border:    #38383a;
-        --warn-bg:   #3a3000;
-        --user-bg:   #0a84ff;
-        --ai-bg:     #2c2c2e;
-        --ai-fg:     #f2f2f7;
-        --tool-bg:   #1c1c1e;
+        --bg:     #000000;
+        --bg2:    #1c1c1e;
+        --bg3:    #2c2c2e;
+        --text:   #f2f2f7;
+        --text2:  #8e8e93;
+        --accent: #0a84ff;
+        --border: #38383a;
       }
     }
     :root[data-theme="dark"] {
-      --bg:        #000000;
-      --bg2:       #1c1c1e;
-      --bg3:       #2c2c2e;
-      --text:      #f2f2f7;
-      --text2:     #8e8e93;
-      --accent:    #0a84ff;
-      --border:    #38383a;
-      --warn-bg:   #3a3000;
-      --user-bg:   #0a84ff;
-      --ai-bg:     #2c2c2e;
-      --ai-fg:     #f2f2f7;
-      --tool-bg:   #1c1c1e;
+      --bg:     #000000;
+      --bg2:    #1c1c1e;
+      --bg3:    #2c2c2e;
+      --text:   #f2f2f7;
+      --text2:  #8e8e93;
+      --accent: #0a84ff;
+      --border: #38383a;
     }
-    /* Font size scaling */
     :root[data-fontsize="small"]  { font-size: 13px; }
     :root[data-fontsize="medium"] { font-size: 15px; }
     :root[data-fontsize="large"]  { font-size: 18px; }
@@ -75,14 +58,12 @@
       overflow: hidden;
       padding-top: var(--safe-top);
     }
-    /* ── Main content ────────────────────────────────────────── */
     .page {
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       padding-bottom: calc(var(--nav-h) + var(--safe-bottom) + 8px);
     }
-    /* ── Bottom nav ──────────────────────────────────────────── */
     .nav {
       position: fixed;
       bottom: 0; left: 0; right: 0;
@@ -110,17 +91,6 @@
     }
     .nav a.active { color: var(--accent); }
     .nav a svg { width: 24px; height: 24px; }
-    @keyframes chat-thinking {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-    .nav a.ai-busy {
-      color: var(--accent);
-    }
-    .nav a.ai-busy svg {
-      animation: chat-thinking 1s ease-in-out infinite;
-    }
-    /* ── Buttons ─────────────────────────────────────────────── */
     .btn {
       display: inline-flex;
       align-items: center;
@@ -135,11 +105,10 @@
       text-decoration: none;
       -webkit-tap-highlight-color: transparent;
     }
-    .btn-primary  { background: var(--accent); color: #fff; }
-    .btn-ghost    { background: var(--bg3); color: var(--text); }
-    .btn-danger   { background: var(--danger); color: #fff; }
-    .btn-sm       { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
-    /* ── Form controls ───────────────────────────────────────── */
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-ghost   { background: var(--bg3); color: var(--text); }
+    .btn-danger  { background: var(--danger); color: #fff; }
+    .btn-sm      { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
     input[type="text"], textarea, select {
       width: 100%;
       background: var(--bg2);
@@ -153,24 +122,7 @@
       outline: none;
       -webkit-appearance: none;
     }
-    input[type="text"]:focus,
-    textarea:focus { border-color: var(--accent); }
-    /* ── Cards / list items ──────────────────────────────────── */
-    .card {
-      background: var(--bg2);
-      border-radius: 12px;
-      padding: 14px 16px;
-      margin: 0 16px 10px;
-    }
-    .section-header {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text2);
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding: 18px 16px 6px;
-    }
-    /* ── Priority badges ─────────────────────────────────────── */
+    input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
     .badge {
       display: inline-block;
       font-size: 11px;
@@ -183,52 +135,16 @@
     .badge-high   { background: #ff950022; color: #ff9500; }
     .badge-medium { background: #007aff22; color: var(--accent); }
     .badge-low    { background: var(--bg3); color: var(--text2); }
-    /* ── Utility ─────────────────────────────────────────────── */
-    .text2    { color: var(--text2); }
-    .text-sm  { font-size: 13px; }
-    .mt-1     { margin-top: 4px; }
-    .mt-2     { margin-top: 10px; }
-    .flex     { display: flex; }
-    .flex-1   { flex: 1; }
-    .gap-2    { gap: 8px; }
-    .items-center { align-items: center; }
-    /* ── Wiki content styles ─────────────────────────────────── */
-    .wiki-content { padding: 16px; max-width: 700px; }
-    .wiki-content h1 { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
-    .wiki-content h2 { font-size: 20px; font-weight: 600; margin: 20px 0 8px; }
-    .wiki-content h3 { font-size: 17px; font-weight: 600; margin: 16px 0 6px; }
-    .wiki-content p  { margin-bottom: 12px; }
-    .wiki-content ul, .wiki-content ol { padding-left: 22px; margin-bottom: 12px; }
-    .wiki-content li { margin-bottom: 4px; }
-    .wiki-content a         { color: var(--accent); text-decoration: none; }
-    .wiki-content a:visited { color: var(--text2); }
-    .wiki-content a:hover   { text-decoration: underline; }
-    .wiki-content code {
-      background: var(--bg3);
-      border-radius: 5px;
-      padding: 2px 6px;
-      font-size: 14px;
-      font-family: "SF Mono", "Fira Code", monospace;
-    }
-    .wiki-content pre {
-      background: var(--bg3);
-      border-radius: 10px;
-      padding: 14px;
-      overflow-x: auto;
-      margin-bottom: 12px;
+    .text2   { color: var(--text2); }
+    .text-sm { font-size: 13px; }
+    .section-header {
       font-size: 13px;
-    }
-    .wiki-content pre code { background: none; padding: 0; }
-    .wiki-content table { border-collapse: collapse; width: 100%; margin-bottom: 12px; font-size: 14px; }
-    .wiki-content th, .wiki-content td { border: 1px solid var(--border); padding: 7px 10px; text-align: left; }
-    .wiki-content th { background: var(--bg2); font-weight: 600; }
-    .wiki-content blockquote {
-      border-left: 3px solid var(--accent);
-      padding-left: 12px;
+      font-weight: 600;
       color: var(--text2);
-      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 18px 16px 6px;
     }
-    .wiki-content hr { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
   </style>
   {% block head %}{% endblock %}
 </head>
@@ -236,83 +152,37 @@
   {% block body %}{% endblock %}
 
   <nav class="nav">
-    {% if current_user %}
-    <form method="post" action="/auth/logout" style="display:none" id="logout-form"></form>
-    {% endif %}
-    <a href="/chat" id="nav-chat" {% if active == 'chat' %}class="active"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-      </svg>
-      Chat
-    </a>
-    <a href="/wiki/" {% if active == 'wiki' %}class="active"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-      </svg>
-      Wiki
-    </a>
-    <a href="/reading-list" {% if active == 'inbox' %}class="active"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
-      </svg>
-      Reading List
-    </a>
     <a href="/tasks" {% if active == 'tasks' %}class="active"{% endif %}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
       </svg>
       Tasks
     </a>
-    <a href="/blog/" {% if active == 'blog' %}class="active"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-      </svg>
-      Blog
-    </a>
-    <a href="/settings" {% if active == 'settings' %}class="active"{% endif %}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-      </svg>
-      Settings
-    </a>
+    <form method="post" action="/auth/logout" style="flex:1;display:flex;">
+      <button type="submit" style="flex:1;display:flex;flex-direction:column;align-items:center;
+              justify-content:center;gap:3px;padding-bottom:var(--safe-bottom);
+              background:none;border:none;cursor:pointer;color:var(--text2);
+              font-size:10px;font-weight:500;letter-spacing:.02em;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Sign Out
+      </button>
+    </form>
   </nav>
+
   <script>
   (function() {
-    // Theme
     function applyTheme(t) {
       if (t === 'dark')       document.documentElement.setAttribute('data-theme', 'dark');
       else if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
       else                    document.documentElement.removeAttribute('data-theme');
     }
     applyTheme(localStorage.getItem('theme') || 'system');
-    window.setTheme = function(t) {
-      localStorage.setItem('theme', t);
-      applyTheme(t);
-    };
-
-    // Font size
     function applyFontSize(s) {
       document.documentElement.setAttribute('data-fontsize', s || 'medium');
     }
     applyFontSize(localStorage.getItem('fontSize') || 'medium');
-    window.setFontSize = function(s) {
-      localStorage.setItem('fontSize', s);
-      applyFontSize(s);
-    };
-  })();
-  </script>
-  <script>
-  (function() {
-    var navChat = document.getElementById('nav-chat');
-    if (!navChat) return;
-    function syncBusy() {
-      fetch('/chat/status').then(function(r){ return r.json(); }).then(function(s) {
-        if (s.running) navChat.classList.add('ai-busy');
-        else navChat.classList.remove('ai-busy');
-      }).catch(function(){});
-    }
-    syncBusy();
-    setInterval(syncBusy, 2000);
   })();
   </script>
 </body>
