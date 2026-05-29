@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-"""
-Email sending utilities for doit.
-Tries Resend API first, falls back to SMTP.
-"""
+"""Email sending utilities for doit (Resend API only)."""
 
 import logging
-import smtplib
 import sys
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from config import cfg_bool, cfg_get, cfg_int
+from config import cfg_get
 
 logger = logging.getLogger(__name__)
 
@@ -24,26 +18,12 @@ def send_email(
     text_body: str,
     html_body: str | None = None,
 ) -> bool:
-    """Send an email. Returns True on success, False on failure."""
+    """Send an email via Resend. Returns True on success, False on failure."""
     resend_key = cfg_get("email", "resend_api_key", "").strip()
-    if resend_key:
-        return _send_via_resend(resend_key, to_addr, subject, text_body, html_body)
+    if not resend_key:
+        logger.warning("No resend_api_key configured. Email not sent.")
+        return False
 
-    smtp_host = cfg_get("email", "smtp_host", "").strip()
-    if smtp_host:
-        return _send_via_smtp(smtp_host, to_addr, subject, text_body, html_body)
-
-    logger.warning("No email transport configured (no resend_api_key or smtp_host). Email not sent.")
-    return False
-
-
-def _send_via_resend(
-    api_key: str,
-    to_addr: str,
-    subject: str,
-    text_body: str,
-    html_body: str | None,
-) -> bool:
     try:
         import urllib.request
         import json as _json
@@ -63,7 +43,7 @@ def _send_via_resend(
             "https://api.resend.com/emails",
             data=data,
             headers={
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {resend_key}",
                 "Content-Type": "application/json",
             },
             method="POST",
@@ -72,49 +52,6 @@ def _send_via_resend(
             return resp.status in (200, 201)
     except Exception as exc:
         logger.error("Resend API error: %s", exc)
-        return False
-
-
-def _send_via_smtp(
-    smtp_host: str,
-    to_addr: str,
-    subject: str,
-    text_body: str,
-    html_body: str | None,
-) -> bool:
-    try:
-        smtp_port = cfg_int("email", "smtp_port", 587)
-        smtp_user = cfg_get("email", "smtp_user", "")
-        smtp_pass = cfg_get("email", "smtp_password", "")
-        smtp_tls  = cfg_bool("email", "smtp_tls", True)
-        from_addr = cfg_get("email", "from_address", "noreply@example.com")
-
-        if html_body:
-            msg = MIMEMultipart("alternative")
-            msg.attach(MIMEText(text_body, "plain"))
-            msg.attach(MIMEText(html_body, "html"))
-        else:
-            msg = MIMEText(text_body, "plain")
-
-        msg["Subject"] = subject
-        msg["From"]    = from_addr
-        msg["To"]      = to_addr
-
-        if smtp_tls:
-            server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-        else:
-            server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
-
-        if smtp_user and smtp_pass:
-            server.login(smtp_user, smtp_pass)
-        server.sendmail(from_addr, [to_addr], msg.as_string())
-        server.quit()
-        return True
-    except Exception as exc:
-        logger.error("SMTP error: %s", exc)
         return False
 
 

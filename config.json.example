@@ -8,11 +8,6 @@
   },
   "email": {
     "resend_api_key": "",
-    "from_address":  "doit@yourdomain.com",
-    "smtp_host":     "",
-    "smtp_port":     587,
-    "smtp_user":     "",
-    "smtp_password": "",
-    "smtp_tls":      true
+    "from_address":  "doit@yourdomain.com"
   }
 }
