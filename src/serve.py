@@ -18,6 +18,7 @@ from pathlib import Path
 try:
     from flask import (Flask, g, abort, flash, redirect, render_template,
                        request, session, url_for)
+    from werkzeug.middleware.proxy_fix import ProxyFix
 except ImportError:
     sys.exit("Error: flask not installed. Run: pip install flask")
 
@@ -50,6 +51,11 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=cfg_bool("server", "https"),
 )
+
+if cfg_bool("server", "https"):
+    # Trust X-Forwarded-For / X-Forwarded-Proto from a single reverse proxy
+    # so request.remote_addr and request.url reflect the real client values.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 
 # ---------------------------------------------------------------------------
