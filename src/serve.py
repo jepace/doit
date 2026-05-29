@@ -8,6 +8,8 @@ Usage:
 """
 
 import functools
+import logging
+import logging.config
 import os
 import re
 import secrets
@@ -31,6 +33,35 @@ from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.config.dictConfig({
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "standard": {
+            "format": "%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout",
+        }
+    },
+    "root": {"level": "INFO", "handlers": ["console"]},
+    # Quiet down werkzeug's per-request lines — we keep auth/admin events instead
+    "loggers": {
+        "werkzeug": {"level": "WARNING", "propagate": True},
+    },
+})
+
+log = logging.getLogger("doit")
 
 app = Flask(__name__, template_folder="templates")
 
@@ -208,9 +239,11 @@ def register():
                     token = UserStore.create_verify_token(user["id"])
                     base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
                     send_verification_email(email, token, base_url)
+                    log.info("register: new account %s from %s", email, _ip())
                     session["pending_email"] = email
                     return redirect(url_for("verify_pending"))
                 except ValueError as exc:
+                    log.warning("register: failed for %s from %s — %s", email, _ip(), exc)
                     error = str(exc)
     return render_template("register.html", error=error)
 
@@ -225,8 +258,10 @@ def verify_pending():
 def auth_verify(token):
     user = UserStore.consume_verify_token(token)
     if user is None:
+        log.warning("verify: invalid or expired token used")
         return render_template("verify_pending.html", email="",
                                error="This verification link is invalid or has expired.")
+    log.info("verify: email verified for %s", user.get("email"))
     session.pop("pending_email", None)
     session["user_id"] = user["id"]
     session["csrf_token"] = secrets.token_hex(32)
@@ -255,12 +290,14 @@ def auth_login():
     if request.method == "POST":
         ip = _ip()
         if not _check_rate_limit(f"login:{ip}", 10, 300):
+            log.warning("login: rate limit hit from %s", ip)
             error = "Too many login attempts. Please try again later."
         else:
             email    = request.form.get("email", "").strip()
             password = request.form.get("password", "")
             user, err = UserStore.authenticate(email, password)
             if user:
+                log.info("login: success for %s from %s", email, ip)
                 session.clear()
                 session["user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_hex(32)
@@ -275,6 +312,7 @@ def auth_login():
                     send_verification_email(email, token, base_url)
                     session["pending_email"] = email
                     return redirect(url_for("verify_pending"))
+            log.warning("login: failed for %s from %s — %s", email, ip, err)
             error = err
     return render_template("login.html", error=error,
                            next=request.args.get("next", ""))
@@ -282,6 +320,9 @@ def auth_login():
 
 @app.route("/auth/logout", methods=["POST"])
 def auth_logout():
+    user = g.get("user")
+    if user:
+        log.info("logout: %s from %s", user.get("email"), _ip())
     session.clear()
     return redirect(url_for("auth_login"))
 
@@ -296,8 +337,11 @@ def auth_forgot():
             if email:
                 token, user = UserStore.create_reset_token(email)
                 if token and user:
+                    log.info("password-reset: token issued for %s from %s", email, ip)
                     base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
                     send_reset_email(email, token, base_url)
+        else:
+            log.warning("password-reset: rate limit hit from %s", ip)
         # Always show success to avoid enumeration
         submitted = True
     return render_template("forgot_password.html", submitted=submitted)
@@ -318,8 +362,10 @@ def auth_reset(token):
         else:
             ok = UserStore.consume_reset_token(token, password)
             if ok:
+                log.info("password-reset: password changed via token from %s", _ip())
                 flash("Password reset successfully. Please sign in.")
                 return redirect(url_for("auth_login"))
+            log.warning("password-reset: invalid or expired token used from %s", _ip())
             error = "This reset link is invalid or has expired."
     return render_template("reset_password.html", token=token, error=error)
 
@@ -589,7 +635,10 @@ def admin_users():
 def admin_suspend(user_id):
     user = UserStore.get_user(user_id)
     if user:
-        UserStore.suspend_user(user_id, not user.get("suspended", False))
+        new_state = not user.get("suspended", False)
+        UserStore.suspend_user(user_id, new_state)
+        action = "suspended" if new_state else "unsuspended"
+        log.info("admin: %s %s %s", g.user["email"], action, user["email"])
     return redirect(url_for("admin_users"))
 
 
@@ -599,7 +648,10 @@ def admin_delete(user_id):
     if request.args.get("confirm") == "yes":
         # Cannot delete self
         if user_id != g.user["id"]:
+            target = UserStore.get_user(user_id)
             UserStore.delete_user(user_id)
+            log.info("admin: %s deleted user %s", g.user["email"],
+                     target["email"] if target else user_id)
     return redirect(url_for("admin_users"))
 
 
@@ -609,7 +661,12 @@ def admin_toggle_admin(user_id):
     # Cannot demote self
     if user_id == g.user["id"]:
         return redirect(url_for("admin_users"))
+    target = UserStore.get_user(user_id)
     UserStore.toggle_admin(user_id)
+    if target:
+        target_after = UserStore.get_user(user_id)
+        new_role = "admin" if target_after and target_after.get("admin") else "user"
+        log.info("admin: %s set %s role to %s", g.user["email"], target["email"], new_role)
     return redirect(url_for("admin_users"))
 
 
@@ -637,7 +694,7 @@ if __name__ == "__main__":
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     if not UserStore.list_users():
-        print(f"\n  No users exist yet. Register at: http://{host}:{port}/register\n")
+        log.info("No users yet — register at http://%s:%s/register", host, port)
 
-    print(f"Starting doit at http://{host}:{port}")
+    log.info("Starting doit on http://%s:%s (debug=%s, data=%s)", host, port, debug, DATA_DIR)
     app.run(host=host, port=port, debug=debug)
