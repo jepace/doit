@@ -30,11 +30,10 @@ from user_store import UserStore
 from mailer import send_verification_email, send_reset_email
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-WIKI_DIR  = REPO_ROOT / "wiki"
 
 app = Flask(__name__, template_folder="templates")
 
-_secret_file = WIKI_DIR / ".secret"
+_secret_file = DATA_DIR / ".secret"
 _secret = cfg_get("server", "secret")
 if _secret:
     app.secret_key = _secret
@@ -42,7 +41,7 @@ elif _secret_file.exists():
     app.secret_key = _secret_file.read_text().strip()
 else:
     _key = os.urandom(24).hex()
-    WIKI_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     _secret_file.write_text(_key)
     app.secret_key = _key
 
