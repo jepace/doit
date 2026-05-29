@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Lobotomy — Task Filter CLI
+doit — Task Filter CLI
 
 Reads wiki/tasks.md and filters/displays tasks.
 
