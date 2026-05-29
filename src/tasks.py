@@ -4,7 +4,7 @@ doit — Task Filter CLI
 
 Reads data/tasks.md and filters/displays tasks.
 
-Usage: python3 tools/tasks.py [options]
+Usage: python3 src/tasks.py [options]
 
 Options:
   --open            Show open tasks only (default)
@@ -43,7 +43,7 @@ def find_tasks_file(script_path):
         return cwd_tasks
     raise FileNotFoundError(
         f"Cannot find data/tasks.md at {tasks_file} or {cwd_tasks}\n"
-        "Run from the repository root or the tools/ directory."
+        "Run from the repository root or the src/ directory."
     )
 
 

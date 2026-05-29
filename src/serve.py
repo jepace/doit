@@ -4,7 +4,7 @@ doit — Task manager web server (multi-user)
 
 Usage:
   cp config.json.example config.json   # fill in settings
-  python3 tools/serve.py               # http://127.0.0.1:8080
+  python3 src/serve.py               # http://127.0.0.1:8080
 """
 
 import functools

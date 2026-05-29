@@ -2,30 +2,30 @@
 
 ## What This Is
 
-doit is a standalone personal task manager. Tasks live in `data/tasks.md` as plain markdown with inline tags. The web UI (`tools/serve.py`) lets you view, add, edit, and complete tasks.
+doit is a standalone personal task manager. Tasks live in `data/tasks.md` as plain markdown with inline tags. The web UI (`src/serve.py`) lets you view, add, edit, and complete tasks.
 
 ## Running
 
 ```sh
 pip install flask
 cp config.json.example config.json
-python3 tools/serve.py               # web UI at http://127.0.0.1:8080
-python3 tools/tasks.py --due-today   # CLI filter (no server needed)
+python3 src/serve.py               # web UI at http://127.0.0.1:8080
+python3 src/tasks.py --due-today   # CLI filter (no server needed)
 ```
 
 ## Architecture
 
-**`tools/serve.py`** — Flask web server. Routes: `/tasks*` (task CRUD), `/auth/*` (login/logout), `/setup` (first-run password creation). No AI, no wiki, no external dependencies beyond Flask.
+**`src/serve.py`** — Flask web server. Routes: `/tasks*` (task CRUD), `/auth/*` (login/logout), `/setup` (first-run password creation). No AI, no wiki, no external dependencies beyond Flask.
 
-**`tools/task_manager.py`** — Task parsing, reading, and writing. The `Task` class and `read_tasks()`/`write_tasks()` functions. Also handles recurrence.
+**`src/task_manager.py`** — Task parsing, reading, and writing. The `Task` class and `read_tasks()`/`write_tasks()` functions. Also handles recurrence.
 
-**`tools/tasks.py`** — CLI filter tool. Reads `data/tasks.md` and prints filtered/sorted tasks. No Flask needed.
+**`src/tasks.py`** — CLI filter tool. Reads `data/tasks.md` and prints filtered/sorted tasks. No Flask needed.
 
 **`tests/`** — pytest suite (109 tests). Covers task parsing, recurrence, config, and all Flask routes.
 
-**`tools/config.py`** — reads `config.json`. Use `cfg_get(section, key, default)`.
+**`src/config.py`** — reads `config.json`. Use `cfg_get(section, key, default)`.
 
-**`tools/templates/tasks_view.html`** — the main task UI (desktop table + mobile cards).
+**`src/templates/tasks_view.html`** — the main task UI (desktop table + mobile cards).
 
 ## Task format
 

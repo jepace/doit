@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-# Ensure tools/ is importable
+# Ensure src/ is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 STOCK_TASKS = """\
