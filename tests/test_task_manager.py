@@ -5,6 +5,7 @@ Unit tests for task_manager.py — parsing, serialization, and recurrence.
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -60,11 +61,14 @@ class TestTaskParsing:
         assert t.tags == {}
 
     def test_double_colon_corruption_stripped(self):
+        # Old corrupted data: #p::high
         t = Task("- [ ] Task #p::high", 0)
         assert t.priority == "high"
 
     def test_description_with_hash_in_text(self):
+        # Hash in description text (not a tag) should be part of description
         t = Task("- [ ] Fix issue #123 in code #p:low", 0)
+        # #123 matches tag pattern but has no colon value — stored as bare tag
         assert t.priority == "low"
 
     def test_notes_stored(self):
@@ -95,6 +99,7 @@ class TestRoundTrip:
     def test_tags_sorted_alphabetically(self):
         t = Task("- [ ] Task #p:high #due:2026-01-01 #ctx:work", 0)
         result = t.to_line()
+        # Tags should appear in sorted order
         assert result.index("#ctx") < result.index("#due") < result.index("#p")
 
     def test_star_tag_round_trip(self):
@@ -194,6 +199,7 @@ class TestRecurrence:
         assert nxt.due == "2026-07-15"
 
     def test_monthly_end_of_month(self):
+        # Jan 31 + 1m → Feb 28 (or 29 on leap year)
         t = self._completed_task("2026-01-31", "1m")
         nxt = t.get_next_recurrence()
         assert nxt.due == "2026-02-28"
@@ -214,6 +220,7 @@ class TestRecurrence:
         assert nxt.due == "2027-03-10"
 
     def test_relative_recurrence_uses_today(self):
+        # '+' suffix: next due is relative to completion date (today), not the old due date
         t = self._completed_task("2026-01-01", "7d+")
         today = date.today()
         nxt = t.get_next_recurrence()
@@ -248,7 +255,7 @@ class TestRecurrence:
 
 
 # ---------------------------------------------------------------------------
-# read_tasks / write_tasks  (all use explicit tasks_file path)
+# read_tasks / write_tasks
 # ---------------------------------------------------------------------------
 
 class TestReadWriteTasks:
@@ -257,9 +264,9 @@ class TestReadWriteTasks:
         tasks = read_tasks(tmp_tasks_file)
         assert tasks == []
 
-    def test_read_tasks_missing_file(self, tmp_path):
-        nonexistent = tmp_path / "nonexistent.md"
-        assert read_tasks(nonexistent) == []
+    def test_read_tasks_missing_file(self, tmp_tasks_file):
+        missing = tmp_tasks_file.parent / "nonexistent.md"
+        assert read_tasks(missing) == []
 
     def test_read_tasks_count(self, tmp_tasks_file):
         tasks = read_tasks(tmp_tasks_file)

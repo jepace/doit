@@ -6,7 +6,7 @@ Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
 import re
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -158,8 +158,13 @@ class Task:
                 year += 1
             try:
                 next_due = base.replace(year=year, month=month)
-            except ValueError:  # Day doesn't exist in target month
-                next_due = base.replace(year=year, month=month, day=1) - timedelta(days=1)
+            except ValueError:  # Day doesn't exist in target month — clamp to last day
+                overflow_month = month + 1
+                overflow_year  = year
+                if overflow_month > 12:
+                    overflow_month = 1
+                    overflow_year += 1
+                next_due = date(overflow_year, overflow_month, 1) - timedelta(days=1)
         elif unit == 'y':
             next_due = base.replace(year=base.year + count)
         else:

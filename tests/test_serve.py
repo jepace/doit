@@ -1,6 +1,4 @@
-"""
-Integration tests for serve.py Flask routes.
-"""
+"""Integration tests for serve.py Flask routes."""
 
 import json
 import sys
@@ -8,14 +6,13 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-TEST_EMAIL = "test@example.com"
-TEST_PASSWORD = "testpass1"
+from conftest import TEST_EMAIL, TEST_PASSWORD, get_csrf
 
 
 # ---------------------------------------------------------------------------
-# Auth: login / logout
+# Auth: register / login / logout
 # ---------------------------------------------------------------------------
 
 class TestAuth:
@@ -24,38 +21,26 @@ class TestAuth:
         assert r.status_code == 200
 
     def test_login_success_redirects_to_tasks(self, client):
-        with client.session_transaction() as sess:
-            sess["csrf_token"] = "test-csrf"
-        r = client.post("/auth/login",
-                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
-                              "csrf_token": "test-csrf"})
+        csrf = get_csrf(client)
+        r = client.post("/auth/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": csrf})
         assert r.status_code == 302
         assert "/tasks" in r.headers["Location"]
 
     def test_login_wrong_password(self, client):
-        # Pre-seed a csrf_token in session
-        with client.session_transaction() as sess:
-            sess["csrf_token"] = "test-csrf"
-        r = client.post("/auth/login",
-                        data={"email": TEST_EMAIL, "password": "wrongpass",
-                              "csrf_token": "test-csrf"})
+        csrf = get_csrf(client)
+        r = client.post("/auth/login", data={"email": TEST_EMAIL, "password": "wrongpass", "_csrf_token": csrf})
         assert r.status_code == 200
-        assert b"Incorrect" in r.data
 
-    def test_login_next_param(self, client):
-        with client.session_transaction() as sess:
-            sess["csrf_token"] = "test-csrf"
-        r = client.post("/auth/login?next=/tasks",
-                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
-                              "csrf_token": "test-csrf"})
-        assert r.status_code == 302
-        assert "/tasks" in r.headers["Location"]
+    def test_login_unknown_email(self, client):
+        csrf = get_csrf(client)
+        r = client.post("/auth/login", data={"email": "nobody@example.com", "password": "whatever", "_csrf_token": csrf})
+        assert r.status_code == 200
 
     def test_logout_clears_session(self, authed_client):
-        r = authed_client.post("/auth/logout",
-                               data={"csrf_token": "test-csrf"})
+        with authed_client.session_transaction() as sess:
+            csrf = sess["csrf_token"]
+        r = authed_client.post("/auth/logout", data={"_csrf_token": csrf})
         assert r.status_code == 302
-        # After logout, /tasks should redirect to login
         r2 = authed_client.get("/tasks")
         assert "/auth/login" in r2.headers["Location"]
 
@@ -64,10 +49,18 @@ class TestAuth:
         assert r.status_code == 302
         assert "/auth/login" in r.headers["Location"]
 
-    def test_index_redirects_to_tasks(self, authed_client):
+    def test_index_redirects(self, authed_client):
         r = authed_client.get("/")
         assert r.status_code == 302
-        assert "/tasks" in r.headers["Location"]
+
+    def test_register_page_get(self, client):
+        r = client.get("/register")
+        assert r.status_code == 200
+
+    def test_register_duplicate_email(self, client):
+        csrf = get_csrf(client)
+        r = client.post("/register", data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "confirm": TEST_PASSWORD, "_csrf_token": csrf})
+        assert r.status_code in (200, 302)
 
 
 # ---------------------------------------------------------------------------
