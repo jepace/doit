@@ -590,10 +590,7 @@ def admin_toggle_admin(user_id):
     # Cannot demote self
     if user_id == g.user["id"]:
         return redirect(url_for("admin_users"))
-    user = UserStore.get_user(user_id)
-    if user:
-        user["admin"] = not user.get("admin", False)
-        UserStore.save_user(user)
+    UserStore.toggle_admin(user_id)
     return redirect(url_for("admin_users"))
 
 

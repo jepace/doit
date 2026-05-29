@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-User store for multi-user authentication.
-All user data lives under data/ in the repo root.
+User store — all data under data/{uuid}/:
+  profile.json      auth fields (email, password_hash, tokens, etc.)
+  preferences.json  display/UX preferences
+  tasks.md          per-user tasks
 """
 
 import hashlib
@@ -9,7 +11,9 @@ import json
 import os
 import re
 import secrets
+import shutil
 import threading
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -20,269 +24,270 @@ DATA_DIR  = REPO_ROOT / "data"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-_VALID_THEMES     = {"light", "dark", "system"}
-_VALID_FONTSIZES  = {"small", "medium", "large"}
-_VALID_SORT_COLS  = {"due", "priority", "context", "description", "start"}
-_VALID_SORT_DIRS  = {"asc", "desc"}
+_VALID_THEMES    = {"light", "dark", "system"}
+_VALID_FONTSIZES = {"small", "medium", "large"}
+_VALID_SORT_COLS = {"due", "priority", "context", "description", "start"}
+_VALID_SORT_DIRS = {"asc", "desc"}
+
+# Per-key locks for atomic writes (keyed by user_id or "email_index")
+_locks: dict[str, threading.Lock] = {}
+_locks_mu = threading.Lock()
 
 
-def _default_prefs() -> dict:
-    return {
-        "theme":          "system",
-        "font_size":      "medium",
-        "sort_col":       "due",
-        "sort_dir":       "asc",
-    }
-
-# Per-user-id locks for atomic writes
-_user_locks: dict[str, threading.Lock] = {}
-_locks_lock = threading.Lock()
+def _get_lock(key: str) -> threading.Lock:
+    with _locks_mu:
+        if key not in _locks:
+            _locks[key] = threading.Lock()
+        return _locks[key]
 
 
-def _get_lock(user_id: str) -> threading.Lock:
-    with _locks_lock:
-        if user_id not in _user_locks:
-            _user_locks[user_id] = threading.Lock()
-        return _user_locks[user_id]
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
 
+def _user_dir(user_id: str) -> Path:
+    return DATA_DIR / user_id
+
+def _profile_path(user_id: str) -> Path:
+    return _user_dir(user_id) / "profile.json"
+
+def _prefs_path(user_id: str) -> Path:
+    return _user_dir(user_id) / "preferences.json"
 
 def _email_index_path() -> Path:
     return DATA_DIR / "email_index.json"
 
 
-def _users_dir() -> Path:
-    return DATA_DIR / "users"
+# ---------------------------------------------------------------------------
+# Low-level I/O (atomic writes)
+# ---------------------------------------------------------------------------
+
+def _read_json(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
 
 
-def _user_path(user_id: str) -> Path:
-    return _users_dir() / f"{user_id}.json"
-
-
-def _user_data_dir(user_id: str) -> Path:
-    return DATA_DIR / user_id
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 
 def _load_email_index() -> dict:
-    p = _email_index_path()
-    if not p.exists():
-        return {}
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    return _read_json(_email_index_path()) or {}
 
 
 def _save_email_index(index: dict) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = _email_index_path().with_suffix(".tmp")
-    tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
-    os.replace(tmp, _email_index_path())
+    _write_json(_email_index_path(), index)
 
 
-def _load_user_file(user_id: str) -> dict | None:
-    p = _user_path(user_id)
-    if not p.exists():
-        return None
-    try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
+def _token_hash(plain: str) -> str:
+    return hashlib.sha256(plain.encode()).hexdigest()
 
 
-def _write_user_file(user_dict: dict) -> None:
-    user_id = user_dict["id"]
-    _users_dir().mkdir(parents=True, exist_ok=True)
-    p = _user_path(user_id)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(user_dict, indent=2), encoding="utf-8")
-    os.replace(tmp, p)
+def _default_prefs() -> dict:
+    return {
+        "theme":     "system",
+        "font_size": "medium",
+        "sort_col":  "due",
+        "sort_dir":  "asc",
+    }
 
 
-def _token_hash(plain_token: str) -> str:
-    return hashlib.sha256(plain_token.encode()).hexdigest()
-
+# ---------------------------------------------------------------------------
+# UserStore
+# ---------------------------------------------------------------------------
 
 class UserStore:
-    """Stateless class — all methods read/write files."""
+    """Stateless — all methods read/write files under data/{uuid}/."""
+
+    # ── Create / read / write ─────────────────────────────────────────────
 
     @classmethod
     def create_user(cls, email: str, password: str) -> dict:
-        """
-        Creates a new user. Returns the user dict.
-        Raises ValueError on validation failures.
-        """
+        """Create a new user. Returns the merged user dict. Raises ValueError on failure."""
         email = email.strip().lower()
         if not _EMAIL_RE.match(email):
             raise ValueError("Invalid email address.")
         if len(password) < 8:
             raise ValueError("Password must be at least 8 characters.")
 
-        # Check duplicate
-        index = _load_email_index()
-        if email in index:
-            raise ValueError("An account with that email already exists.")
-
-        import uuid
-        user_id = str(uuid.uuid4())
-
-        user_dict = {
-            "id": user_id,
-            "email": email,
-            "password_hash": generate_password_hash(password),
-            "admin": False,
-            "suspended": False,
-            "verified": False,
-            "created_at": datetime.utcnow().isoformat(),
-            "verify_token_hash": None,
-            "verify_token_expires": None,
-            "reset_token_hash": None,
-            "reset_token_expires": None,
-            "failed_logins": 0,
-            "locked_until": None,
-            "prefs": _default_prefs(),
-        }
-
-        # Create per-user tasks.md
-        user_data_dir = _user_data_dir(user_id)
-        user_data_dir.mkdir(parents=True, exist_ok=True)
-        tasks_file = user_data_dir / "tasks.md"
-        tasks_file.write_text(
-            "# Tasks\n\n## Inbox\n\n",
-            encoding="utf-8",
-        )
-
-        # Write user file
-        _write_user_file(user_dict)
-
-        # Update email index atomically
         with _get_lock("email_index"):
             index = _load_email_index()
+            if email in index:
+                raise ValueError("An account with that email already exists.")
+
+            user_id = str(uuid.uuid4())
+            user_dir = _user_dir(user_id)
+            user_dir.mkdir(parents=True, exist_ok=True)
+
+            profile = {
+                "id":                   user_id,
+                "email":                email,
+                "password_hash":        generate_password_hash(password),
+                "admin":                False,
+                "suspended":            False,
+                "verified":             False,
+                "created_at":           datetime.utcnow().isoformat(),
+                "verify_token_hash":    None,
+                "verify_token_expires": None,
+                "reset_token_hash":     None,
+                "reset_token_expires":  None,
+                "failed_logins":        0,
+                "locked_until":         None,
+            }
+            _write_json(_profile_path(user_id), profile)
+            _write_json(_prefs_path(user_id), _default_prefs())
+            (user_dir / "tasks.md").write_text("# Tasks\n\n## Inbox\n\n", encoding="utf-8")
+
             index[email] = user_id
             _save_email_index(index)
 
-        return user_dict
+        return cls._merge(profile, _default_prefs())
 
     @classmethod
     def get_user(cls, user_id: str) -> dict | None:
-        return _load_user_file(user_id)
+        profile = _read_json(_profile_path(user_id))
+        if profile is None:
+            return None
+        prefs = _read_json(_prefs_path(user_id)) or _default_prefs()
+        return cls._merge(profile, prefs)
 
     @classmethod
     def get_by_email(cls, email: str) -> dict | None:
-        email = email.strip().lower()
-        index = _load_email_index()
-        user_id = index.get(email)
-        if not user_id:
-            return None
-        return _load_user_file(user_id)
+        user_id = _load_email_index().get(email.strip().lower())
+        return cls.get_user(user_id) if user_id else None
 
     @classmethod
-    def save_user(cls, user_dict: dict) -> None:
-        lock = _get_lock(user_dict["id"])
+    def save_profile(cls, profile: dict) -> None:
+        """Write profile fields (everything except prefs)."""
+        lock = _get_lock(profile["id"])
         with lock:
-            _write_user_file(user_dict)
+            _write_json(_profile_path(profile["id"]), profile)
+
+    @classmethod
+    def _merge(cls, profile: dict, prefs: dict) -> dict:
+        """Return a combined dict used by the rest of the app."""
+        merged = dict(profile)
+        # Merge with defaults so new pref keys are always present
+        full_prefs = _default_prefs()
+        full_prefs.update({k: v for k, v in prefs.items() if k in full_prefs})
+        merged["prefs"] = full_prefs
+        return merged
+
+    @classmethod
+    def list_users(cls) -> list[dict]:
+        if not DATA_DIR.exists():
+            return []
+        result = []
+        for d in DATA_DIR.iterdir():
+            if not d.is_dir():
+                continue
+            profile = _read_json(d / "profile.json")
+            if profile is None:
+                continue
+            prefs = _read_json(d / "preferences.json") or _default_prefs()
+            result.append(cls._merge(profile, prefs))
+        return result
+
+    # ── Authentication ────────────────────────────────────────────────────
 
     @classmethod
     def authenticate(cls, email: str, password: str) -> tuple[dict | None, str]:
-        """Returns (user_dict, "") on success or (None, error_message) on failure."""
-        email = email.strip().lower()
+        """Returns (user, "") on success or (None, error) on failure."""
         user = cls.get_by_email(email)
         if user is None:
             return None, "Invalid email or password."
-
         if user.get("suspended"):
             return None, "This account has been suspended."
-
         if cls.is_locked(user["id"]):
-            return None, "Account is temporarily locked due to too many failed login attempts. Try again later."
-
+            return None, "Account temporarily locked. Try again later."
         if not user.get("verified"):
             return None, "Please verify your email address before signing in."
-
-        if not check_password_hash(user.get("password_hash", ""), password):
+        if not check_password_hash(user["password_hash"], password):
             cls.record_failed_login(user["id"])
             return None, "Invalid email or password."
-
         cls.clear_failed_logins(user["id"])
         return user, ""
 
     @classmethod
     def record_failed_login(cls, user_id: str) -> None:
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
                 return
-            user["failed_logins"] = user.get("failed_logins", 0) + 1
-            if user["failed_logins"] >= 5:
-                user["locked_until"] = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
-            _write_user_file(user)
+            p["failed_logins"] = p.get("failed_logins", 0) + 1
+            if p["failed_logins"] >= 5:
+                p["locked_until"] = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
+            _write_json(_profile_path(user_id), p)
 
     @classmethod
     def clear_failed_logins(cls, user_id: str) -> None:
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
                 return
-            user["failed_logins"] = 0
-            user["locked_until"] = None
-            _write_user_file(user)
+            p["failed_logins"] = 0
+            p["locked_until"]  = None
+            _write_json(_profile_path(user_id), p)
 
     @classmethod
     def is_locked(cls, user_id: str) -> bool:
-        user = _load_user_file(user_id)
-        if user is None:
+        p = _read_json(_profile_path(user_id))
+        if not p:
             return False
-        locked_until = user.get("locked_until")
+        locked_until = p.get("locked_until")
         if not locked_until:
             return False
         try:
-            until_dt = datetime.fromisoformat(locked_until)
+            if datetime.utcnow() >= datetime.fromisoformat(locked_until):
+                cls.clear_failed_logins(user_id)
+                return False
         except ValueError:
             return False
-        if datetime.utcnow() >= until_dt:
-            # Lock expired — clear it
-            cls.clear_failed_logins(user_id)
-            return False
         return True
+
+    # ── Tokens ────────────────────────────────────────────────────────────
 
     @classmethod
     def create_verify_token(cls, user_id: str) -> str:
         plain = secrets.token_urlsafe(32)
-        expires = (datetime.utcnow() + timedelta(hours=24)).isoformat()
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
                 raise ValueError("User not found.")
-            user["verify_token_hash"] = _token_hash(plain)
-            user["verify_token_expires"] = expires
-            _write_user_file(user)
+            p["verify_token_hash"]    = _token_hash(plain)
+            p["verify_token_expires"] = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+            _write_json(_profile_path(user_id), p)
         return plain
 
     @classmethod
     def consume_verify_token(cls, plain_token: str) -> dict | None:
-        token_h = _token_hash(plain_token)
+        h = _token_hash(plain_token)
         for user in cls.list_users():
-            if user.get("verify_token_hash") == token_h:
-                # Check expiry
-                exp = user.get("verify_token_expires")
-                if exp:
-                    try:
-                        if datetime.utcnow() > datetime.fromisoformat(exp):
-                            return None
-                    except ValueError:
-                        return None
-                lock = _get_lock(user["id"])
-                with lock:
-                    u = _load_user_file(user["id"])
-                    if u is None:
-                        return None
-                    u["verified"] = True
-                    u["verify_token_hash"] = None
-                    u["verify_token_expires"] = None
-                    _write_user_file(u)
-                return u
+            if user.get("verify_token_hash") != h:
+                continue
+            exp = user.get("verify_token_expires")
+            try:
+                if exp and datetime.utcnow() > datetime.fromisoformat(exp):
+                    return None
+            except ValueError:
+                return None
+            with _get_lock(user["id"]):
+                p = _read_json(_profile_path(user["id"]))
+                if p is None:
+                    return None
+                p["verified"]             = True
+                p["verify_token_hash"]    = None
+                p["verify_token_expires"] = None
+                _write_json(_profile_path(user["id"]), p)
+            return cls.get_user(user["id"])
         return None
 
     @classmethod
@@ -291,101 +296,47 @@ class UserStore:
         if user is None:
             return None, None
         plain = secrets.token_urlsafe(32)
-        expires = (datetime.utcnow() + timedelta(hours=1)).isoformat()
-        lock = _get_lock(user["id"])
-        with lock:
-            u = _load_user_file(user["id"])
-            if u is None:
+        with _get_lock(user["id"]):
+            p = _read_json(_profile_path(user["id"]))
+            if p is None:
                 return None, None
-            u["reset_token_hash"] = _token_hash(plain)
-            u["reset_token_expires"] = expires
-            _write_user_file(u)
+            p["reset_token_hash"]    = _token_hash(plain)
+            p["reset_token_expires"] = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+            _write_json(_profile_path(user["id"]), p)
         return plain, user
 
     @classmethod
     def consume_reset_token(cls, plain_token: str, new_password: str) -> bool:
         if len(new_password) < 8:
             return False
-        token_h = _token_hash(plain_token)
+        h = _token_hash(plain_token)
         for user in cls.list_users():
-            if user.get("reset_token_hash") == token_h:
-                exp = user.get("reset_token_expires")
-                if exp:
-                    try:
-                        if datetime.utcnow() > datetime.fromisoformat(exp):
-                            return False
-                    except ValueError:
-                        return False
-                lock = _get_lock(user["id"])
-                with lock:
-                    u = _load_user_file(user["id"])
-                    if u is None:
-                        return False
-                    u["password_hash"] = generate_password_hash(new_password)
-                    u["reset_token_hash"] = None
-                    u["reset_token_expires"] = None
-                    u["failed_logins"] = 0
-                    u["locked_until"] = None
-                    _write_user_file(u)
-                return True
+            if user.get("reset_token_hash") != h:
+                continue
+            exp = user.get("reset_token_expires")
+            try:
+                if exp and datetime.utcnow() > datetime.fromisoformat(exp):
+                    return False
+            except ValueError:
+                return False
+            with _get_lock(user["id"]):
+                p = _read_json(_profile_path(user["id"]))
+                if p is None:
+                    return False
+                p["password_hash"]    = generate_password_hash(new_password)
+                p["reset_token_hash"] = None
+                p["reset_token_expires"] = None
+                p["failed_logins"]    = 0
+                p["locked_until"]     = None
+                _write_json(_profile_path(user["id"]), p)
+            return True
         return False
 
-    @classmethod
-    def list_users(cls) -> list[dict]:
-        users_dir = _users_dir()
-        if not users_dir.exists():
-            return []
-        result = []
-        for p in users_dir.glob("*.json"):
-            try:
-                user = json.loads(p.read_text(encoding="utf-8"))
-                result.append(user)
-            except (json.JSONDecodeError, OSError):
-                continue
-        return result
-
-    @classmethod
-    def suspend_user(cls, user_id: str, suspended: bool) -> None:
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
-                return
-            user["suspended"] = suspended
-            _write_user_file(user)
-
-    @classmethod
-    def delete_user(cls, user_id: str) -> None:
-        import shutil
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            email = user.get("email") if user else None
-
-            # Remove user file
-            p = _user_path(user_id)
-            if p.exists():
-                p.unlink()
-
-            # Remove user data directory
-            user_data_dir = _user_data_dir(user_id)
-            if user_data_dir.exists():
-                shutil.rmtree(user_data_dir)
-
-        # Remove from email index
-        if email:
-            with _get_lock("email_index"):
-                index = _load_email_index()
-                index.pop(email, None)
-                _save_email_index(index)
+    # ── Preferences ───────────────────────────────────────────────────────
 
     @classmethod
     def get_prefs(cls, user_id: str) -> dict:
-        user = _load_user_file(user_id)
-        if user is None:
-            return _default_prefs()
-        prefs = user.get("prefs") or {}
-        # Merge with defaults so new keys are always present
+        prefs = _read_json(_prefs_path(user_id)) or {}
         merged = _default_prefs()
         merged.update({k: v for k, v in prefs.items() if k in merged})
         return merged
@@ -393,53 +344,59 @@ class UserStore:
     @classmethod
     def save_prefs(cls, user_id: str, theme: str, font_size: str,
                    sort_col: str, sort_dir: str) -> None:
-        """Validate and persist user preferences."""
-        theme     = theme     if theme     in _VALID_THEMES    else "system"
-        font_size = font_size if font_size in _VALID_FONTSIZES else "medium"
-        sort_col  = sort_col  if sort_col  in _VALID_SORT_COLS else "due"
-        sort_dir  = sort_dir  if sort_dir  in _VALID_SORT_DIRS else "asc"
+        prefs = {
+            "theme":     theme     if theme     in _VALID_THEMES    else "system",
+            "font_size": font_size if font_size in _VALID_FONTSIZES else "medium",
+            "sort_col":  sort_col  if sort_col  in _VALID_SORT_COLS else "due",
+            "sort_dir":  sort_dir  if sort_dir  in _VALID_SORT_DIRS else "asc",
+        }
+        with _get_lock(user_id):
+            _write_json(_prefs_path(user_id), prefs)
 
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
+    # ── Account management ────────────────────────────────────────────────
+
+    @classmethod
+    def suspend_user(cls, user_id: str, suspended: bool) -> None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
                 return
-            user.setdefault("prefs", {})
-            user["prefs"]["theme"]     = theme
-            user["prefs"]["font_size"] = font_size
-            user["prefs"]["sort_col"]  = sort_col
-            user["prefs"]["sort_dir"]  = sort_dir
-            _write_user_file(user)
+            p["suspended"] = suspended
+            _write_json(_profile_path(user_id), p)
+
+    @classmethod
+    def delete_user(cls, user_id: str) -> None:
+        p = _read_json(_profile_path(user_id))
+        email = p.get("email") if p else None
+        with _get_lock(user_id):
+            if _user_dir(user_id).exists():
+                shutil.rmtree(_user_dir(user_id))
+        if email:
+            with _get_lock("email_index"):
+                index = _load_email_index()
+                index.pop(email, None)
+                _save_email_index(index)
 
     @classmethod
     def change_email(cls, user_id: str, new_email: str) -> None:
-        """Change a user's email, updating the index atomically.
-        Caller is responsible for setting verified=False and issuing a new
-        verification token after calling this."""
         new_email = new_email.strip().lower()
         if not _EMAIL_RE.match(new_email):
             raise ValueError("Invalid email address.")
-
-        # Check not already taken by another user
-        index = _load_email_index()
-        existing_id = index.get(new_email)
-        if existing_id and existing_id != user_id:
-            raise ValueError("That email address is already in use.")
-
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
-                raise ValueError("User not found.")
-            old_email = user["email"]
-            user["email"]    = new_email
-            user["verified"] = False
-            user["verify_token_hash"]    = None
-            user["verify_token_expires"] = None
-            _write_user_file(user)
-
         with _get_lock("email_index"):
             index = _load_email_index()
+            existing = index.get(new_email)
+            if existing and existing != user_id:
+                raise ValueError("That email address is already in use.")
+            with _get_lock(user_id):
+                p = _read_json(_profile_path(user_id))
+                if p is None:
+                    raise ValueError("User not found.")
+                old_email = p["email"]
+                p["email"]                = new_email
+                p["verified"]             = False
+                p["verify_token_hash"]    = None
+                p["verify_token_expires"] = None
+                _write_json(_profile_path(user_id), p)
             index.pop(old_email, None)
             index[new_email] = user_id
             _save_email_index(index)
@@ -447,24 +404,32 @@ class UserStore:
     @classmethod
     def change_password(cls, user_id: str, current_password: str,
                         new_password: str) -> tuple[bool, str]:
-        """Verify current password then update to new one.
-        Returns (success, error_message)."""
         if len(new_password) < 8:
             return False, "Password must be at least 8 characters."
-        lock = _get_lock(user_id)
-        with lock:
-            user = _load_user_file(user_id)
-            if user is None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
                 return False, "User not found."
-            if not check_password_hash(user["password_hash"], current_password):
+            if not check_password_hash(p["password_hash"], current_password):
                 return False, "Current password is incorrect."
-            user["password_hash"] = generate_password_hash(new_password)
-            _write_user_file(user)
+            p["password_hash"] = generate_password_hash(new_password)
+            _write_json(_profile_path(user_id), p)
         return True, ""
 
     @classmethod
+    def toggle_admin(cls, user_id: str) -> None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return
+            p["admin"] = not p.get("admin", False)
+            _write_json(_profile_path(user_id), p)
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    @classmethod
     def get_task_count(cls, user_id: str) -> int:
-        tasks_file = _user_data_dir(user_id) / "tasks.md"
+        tasks_file = _user_dir(user_id) / "tasks.md"
         if not tasks_file.exists():
             return 0
         try:
