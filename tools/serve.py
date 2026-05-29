@@ -127,7 +127,11 @@ def load_user():
 @app.context_processor
 def inject_globals():
     csrf_token = generate_csrf()
-    return {"current_user": g.get("user"), "csrf_token": csrf_token}
+    path   = request.path
+    active = ("settings" if path.startswith("/settings")
+              else "admin"  if path.startswith("/admin")
+              else "tasks")
+    return {"current_user": g.get("user"), "csrf_token": csrf_token, "active": active}
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +497,57 @@ def tasks_bulk_update():
 # ---------------------------------------------------------------------------
 # Admin routes
 # ---------------------------------------------------------------------------
+
+@app.route("/settings", methods=["GET", "POST"])
+@require_login
+def settings():
+    user   = g.user
+    errors = {}
+    success = request.args.get("saved") == "1"
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "prefs":
+            UserStore.save_prefs(
+                user["id"],
+                theme     = request.form.get("theme",    "system"),
+                font_size = request.form.get("font_size","medium"),
+                sort_col  = request.form.get("sort_col", "due"),
+                sort_dir  = request.form.get("sort_dir", "asc"),
+            )
+            return redirect(url_for("settings", saved="1"))
+
+        elif action == "email":
+            new_email = request.form.get("new_email", "").strip().lower()
+            try:
+                UserStore.change_email(user["id"], new_email)
+                token    = UserStore.create_verify_token(user["id"])
+                base_url = cfg_get("server", "base_url",
+                                   f"http://127.0.0.1:{cfg_int('server','port',8080)}")
+                send_verification_email(new_email, token, base_url)
+                session.clear()
+                return redirect(url_for("verify_pending") + f"?email={new_email}")
+            except ValueError as e:
+                errors["email"] = str(e)
+
+        elif action == "password":
+            current_pw = request.form.get("current_password", "")
+            new_pw     = request.form.get("new_password", "")
+            confirm_pw = request.form.get("confirm_password", "")
+            if new_pw != confirm_pw:
+                errors["password"] = "New passwords do not match."
+            else:
+                ok, msg = UserStore.change_password(user["id"], current_pw, new_pw)
+                if ok:
+                    return redirect(url_for("settings", saved="1"))
+                else:
+                    errors["password"] = msg
+
+    prefs = UserStore.get_prefs(user["id"])
+    return render_template("settings.html", user=user, prefs=prefs,
+                           errors=errors, success=success)
+
 
 @app.route("/admin")
 @require_admin

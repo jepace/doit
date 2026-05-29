@@ -20,6 +20,20 @@ DATA_DIR  = REPO_ROOT / "data"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+_VALID_THEMES     = {"light", "dark", "system"}
+_VALID_FONTSIZES  = {"small", "medium", "large"}
+_VALID_SORT_COLS  = {"due", "priority", "context", "description", "start"}
+_VALID_SORT_DIRS  = {"asc", "desc"}
+
+
+def _default_prefs() -> dict:
+    return {
+        "theme":          "system",
+        "font_size":      "medium",
+        "sort_col":       "due",
+        "sort_dir":       "asc",
+    }
+
 # Per-user-id locks for atomic writes
 _user_locks: dict[str, threading.Lock] = {}
 _locks_lock = threading.Lock()
@@ -125,6 +139,7 @@ class UserStore:
             "reset_token_expires": None,
             "failed_logins": 0,
             "locked_until": None,
+            "prefs": _default_prefs(),
         }
 
         # Create per-user tasks.md
@@ -363,6 +378,89 @@ class UserStore:
                 index = _load_email_index()
                 index.pop(email, None)
                 _save_email_index(index)
+
+    @classmethod
+    def get_prefs(cls, user_id: str) -> dict:
+        user = _load_user_file(user_id)
+        if user is None:
+            return _default_prefs()
+        prefs = user.get("prefs") or {}
+        # Merge with defaults so new keys are always present
+        merged = _default_prefs()
+        merged.update({k: v for k, v in prefs.items() if k in merged})
+        return merged
+
+    @classmethod
+    def save_prefs(cls, user_id: str, theme: str, font_size: str,
+                   sort_col: str, sort_dir: str) -> None:
+        """Validate and persist user preferences."""
+        theme     = theme     if theme     in _VALID_THEMES    else "system"
+        font_size = font_size if font_size in _VALID_FONTSIZES else "medium"
+        sort_col  = sort_col  if sort_col  in _VALID_SORT_COLS else "due"
+        sort_dir  = sort_dir  if sort_dir  in _VALID_SORT_DIRS else "asc"
+
+        lock = _get_lock(user_id)
+        with lock:
+            user = _load_user_file(user_id)
+            if user is None:
+                return
+            user.setdefault("prefs", {})
+            user["prefs"]["theme"]     = theme
+            user["prefs"]["font_size"] = font_size
+            user["prefs"]["sort_col"]  = sort_col
+            user["prefs"]["sort_dir"]  = sort_dir
+            _write_user_file(user)
+
+    @classmethod
+    def change_email(cls, user_id: str, new_email: str) -> None:
+        """Change a user's email, updating the index atomically.
+        Caller is responsible for setting verified=False and issuing a new
+        verification token after calling this."""
+        new_email = new_email.strip().lower()
+        if not _EMAIL_RE.match(new_email):
+            raise ValueError("Invalid email address.")
+
+        # Check not already taken by another user
+        index = _load_email_index()
+        existing_id = index.get(new_email)
+        if existing_id and existing_id != user_id:
+            raise ValueError("That email address is already in use.")
+
+        lock = _get_lock(user_id)
+        with lock:
+            user = _load_user_file(user_id)
+            if user is None:
+                raise ValueError("User not found.")
+            old_email = user["email"]
+            user["email"]    = new_email
+            user["verified"] = False
+            user["verify_token_hash"]    = None
+            user["verify_token_expires"] = None
+            _write_user_file(user)
+
+        with _get_lock("email_index"):
+            index = _load_email_index()
+            index.pop(old_email, None)
+            index[new_email] = user_id
+            _save_email_index(index)
+
+    @classmethod
+    def change_password(cls, user_id: str, current_password: str,
+                        new_password: str) -> tuple[bool, str]:
+        """Verify current password then update to new one.
+        Returns (success, error_message)."""
+        if len(new_password) < 8:
+            return False, "Password must be at least 8 characters."
+        lock = _get_lock(user_id)
+        with lock:
+            user = _load_user_file(user_id)
+            if user is None:
+                return False, "User not found."
+            if not check_password_hash(user["password_hash"], current_password):
+                return False, "Current password is incorrect."
+            user["password_hash"] = generate_password_hash(new_password)
+            _write_user_file(user)
+        return True, ""
 
     @classmethod
     def get_task_count(cls, user_id: str) -> int:
