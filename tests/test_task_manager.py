@@ -9,8 +9,6 @@ from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-
 from task_manager import Task, read_tasks, write_tasks
 
 

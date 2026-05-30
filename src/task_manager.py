@@ -150,7 +150,10 @@ class Task:
         if relative:
             base = datetime.now().date()
         else:
-            base = datetime.fromisoformat(self.due or datetime.now().isoformat()).date() if self.due else datetime.now().date()
+            try:
+                base = datetime.fromisoformat(self.due).date() if self.due else datetime.now().date()
+            except ValueError:
+                base = datetime.now().date()
 
         # Calculate next due date
         if unit == 'd':
@@ -215,7 +218,9 @@ def read_tasks(tasks_file: Path):
             i += 1
             while i < len(lines):
                 nxt = lines[i]
-                if re.match(r'^##', nxt) or re.match(r'^\s*- \[[x ]\]', nxt):
+                # Only break on top-level (non-indented) task lines so that
+                # indented checkboxes (subtasks) are preserved as note content.
+                if re.match(r'^##', nxt) or re.match(r'^- \[[x ]\]', nxt):
                     break
                 if nxt and (nxt[0] in ' \t' or not nxt.strip()):
                     notes_lines.append(nxt)
@@ -232,8 +237,12 @@ def read_tasks(tasks_file: Path):
     return tasks
 
 
-def write_tasks(tasks, tasks_file: Path):
-    """Write updated tasks back to the given tasks file."""
+def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
+    """Write updated tasks back to the given tasks file.
+
+    extra_lines: optional list of raw lines to append after all existing tasks
+    (used to add a new recurrence task in the same atomic write).
+    """
     if not tasks_file.exists():
         return
 
@@ -268,6 +277,9 @@ def write_tasks(tasks, tasks_file: Path):
 
         new_lines.append(line)
         i += 1
+
+    if extra_lines:
+        new_lines.extend(extra_lines)
 
     _write_text_atomic(tasks_file, '\n'.join(new_lines))
 

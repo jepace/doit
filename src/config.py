@@ -64,6 +64,10 @@ def cfg_int(section: str, key: str, default: int = 0) -> int:
 def cfg_bool(section: str, key: str, default: bool = False) -> bool:
     _reload_if_changed()
     v = _c.get(section, {}).get(key)
-    return bool(v) if v is not None else default
+    if v is None:
+        return default
+    if isinstance(v, bool):
+        return v
+    return str(v).lower() not in ("false", "0", "no", "")
 
 

@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -76,6 +77,7 @@ else:
     _key = os.urandom(24).hex()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     _secret_file.write_text(_key)
+    os.chmod(_secret_file, 0o600)
     app.secret_key = _key
 
 app.config.update(
@@ -88,6 +90,7 @@ if cfg_bool("server", "https"):
     # Trust X-Forwarded-For / X-Forwarded-Proto from a single reverse proxy
     # so request.remote_addr and request.url reflect the real client values.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    _behind_proxy = True
 
 
 # ---------------------------------------------------------------------------
@@ -130,33 +133,50 @@ def csrf_protect():
 # ---------------------------------------------------------------------------
 
 _rate_limit: dict[str, list[float]] = {}
+_rate_limit_lock = threading.Lock()
+_RATE_LIMIT_MAX_KEYS = 10_000
 
 
 def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> bool:
     """Returns True if request is allowed, False if over limit."""
     now = time.time()
-    timestamps = _rate_limit.get(key, [])
-    # Prune old timestamps
-    timestamps = [t for t in timestamps if now - t < window_seconds]
-    if len(timestamps) >= max_requests:
+    with _rate_limit_lock:
+        timestamps = _rate_limit.get(key, [])
+        timestamps = [t for t in timestamps if now - t < window_seconds]
+        if len(timestamps) >= max_requests:
+            _rate_limit[key] = timestamps
+            return False
+        timestamps.append(now)
         _rate_limit[key] = timestamps
-        return False
-    timestamps.append(now)
-    _rate_limit[key] = timestamps
-    return True
+        # Prune stale keys to prevent unbounded growth from spoofed IPs
+        if len(_rate_limit) > _RATE_LIMIT_MAX_KEYS:
+            cutoff = now - 3600
+            stale = [k for k, ts in _rate_limit.items() if not ts or ts[-1] < cutoff]
+            for k in stale:
+                del _rate_limit[k]
+        return True
+
+
+# True when ProxyFix is active and X-Forwarded-For can be trusted
+_behind_proxy: bool = False
 
 
 def _ip() -> str:
-    return request.headers.get("X-Forwarded-For", request.remote_addr or "unknown").split(",")[0].strip()
+    if _behind_proxy:
+        # ProxyFix has already resolved request.remote_addr from X-Forwarded-For
+        return request.remote_addr or "unknown"
+    return request.remote_addr or "unknown"
 
 
 def _safe_next(url: str) -> str:
     """Return url only if it's a safe relative path, otherwise /tasks."""
     from urllib.parse import urlparse
+    if not url or url.startswith("//") or url.startswith("/\\"):
+        return url_for("tasks")
     parsed = urlparse(url)
     if parsed.scheme or parsed.netloc:
         return url_for("tasks")
-    return url or url_for("tasks")
+    return url
 
 
 # ---------------------------------------------------------------------------
@@ -178,7 +198,9 @@ def load_user():
 
 @app.context_processor
 def inject_globals():
-    csrf_token = generate_csrf()
+    # Only generate a CSRF token when a session already exists (authenticated user).
+    # Avoid creating sessions (and Set-Cookie) for anonymous visitors.
+    csrf_token = generate_csrf() if session.get("user_id") or session.get("csrf_token") else ""
     path   = request.path
     active = ("settings" if path.startswith("/settings")
               else "admin"  if path.startswith("/admin")
@@ -208,6 +230,17 @@ def require_admin(f):
             abort(403)
         return f(*args, **kwargs)
     return decorated
+
+
+# ---------------------------------------------------------------------------
+# Error handlers
+# ---------------------------------------------------------------------------
+
+@app.errorhandler(500)
+def internal_error(exc):
+    user_id = session.get("user_id", "anonymous")
+    log.exception("500 on %s %s (user=%s)", request.method, request.path, user_id)
+    return "Internal server error", 500
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +278,9 @@ def register():
                     user = UserStore.create_user(email, password)
                     token = UserStore.create_verify_token(user["id"])
                     base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
-                    send_verification_email(email, token, base_url)
+                    ok = send_verification_email(email, token, base_url)
+                    if not ok:
+                        log.error("register: verification email failed for %s", email)
                     log.info("register: new account %s from %s", email, _ip())
                     session["pending_email"] = email
                     return redirect(url_for("verify_pending"))
@@ -279,12 +314,15 @@ def auth_verify(token):
 @app.route("/auth/resend-verify", methods=["POST"])
 def auth_resend_verify():
     email = request.form.get("email", "").strip() or session.get("pending_email", "")
-    if email:
+    ip = _ip()
+    if email and _check_rate_limit(f"resend:{ip}", 3, 3600) and _check_rate_limit(f"resend:{email}", 3, 3600):
         user = UserStore.get_by_email(email)
         if user and not user.get("verified"):
             token = UserStore.create_verify_token(user["id"])
             base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
-            send_verification_email(email, token, base_url)
+            ok = send_verification_email(email, token, base_url)
+            if not ok:
+                log.error("resend-verify: email send failed for %s", email)
     session["pending_email"] = email
     return redirect(url_for("verify_pending"))
 
@@ -311,14 +349,11 @@ def auth_login():
                 next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
                 return redirect(next_url)
             elif err == "Please verify your email address before signing in.":
-                # Resend verification and show pending page
-                user_obj = UserStore.get_by_email(email)
-                if user_obj:
-                    token = UserStore.create_verify_token(user_obj["id"])
-                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
-                    send_verification_email(email, token, base_url)
-                    session["pending_email"] = email
-                    return redirect(url_for("verify_pending"))
+                # Don't auto-resend here — that would allow email-bombing unverified
+                # accounts via the login form. Direct to the verify page where the
+                # user can request a resend with proper rate limiting.
+                session["pending_email"] = email
+                return redirect(url_for("verify_pending"))
             log.warning("login: failed for %s from %s — %s", email, ip, err)
             error = err
     return render_template("login.html", error=error,
@@ -346,7 +381,9 @@ def auth_forgot():
                 if token and user:
                     log.info("password-reset: token issued for %s from %s", email, ip)
                     base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
-                    send_reset_email(email, token, base_url)
+                    ok = send_reset_email(email, token, base_url)
+                    if not ok:
+                        log.error("password-reset: email send failed for %s", email)
         else:
             log.warning("password-reset: rate limit hit from %s", ip)
         # Always show success to avoid enumeration
@@ -505,16 +542,12 @@ def tasks_update():
         else:
             return {"error": "unknown field"}, 400
 
-        write_tasks(tasks_list, tasks_file)
-
+        extra = []
         if next_task:
-            next_line  = next_task.to_line()
-            next_notes = next_task.raw_notes.strip()
-            with open(tasks_file, "a", encoding="utf-8") as f:
-                f.write("\n" + next_line)
-                if next_notes:
-                    for note_line in next_notes.split("\n"):
-                        f.write("\n" + note_line)
+            extra.append(next_task.to_line())
+            if next_task.raw_notes.strip():
+                extra.extend(next_task.raw_notes.split("\n"))
+        write_tasks(tasks_list, tasks_file, extra_lines=extra if extra else None)
 
     result = {"ok": True}
     if next_task:
@@ -543,23 +576,24 @@ def tasks_bulk_update():
         tasks_file = _get_tasks_file()
         tasks_list = read_tasks(tasks_file)
 
-        for task_id in task_ids:
-            if not (0 <= task_id < len(tasks_list)):
-                continue
-            task = tasks_list[task_id]
-            if action == "set-priority":
-                task.set_priority(value if value else None)
-            elif action == "set-context":
-                task.set_context(value if value else None)
-            elif action == "set-due":
-                task.set_due(value if value else None)
-            elif action == "set-project":
-                task.set_project(value if value else None)
-            elif action == "delete":
-                task.description = "[DELETED]"
-                task.complete = True
-            else:
-                return {"error": "unknown action"}, 400
+        if action == "delete":
+            delete_ids = set(task_ids)
+            tasks_list = [t for t in tasks_list if t.line_num not in delete_ids]
+        else:
+            for task_id in task_ids:
+                if not (0 <= task_id < len(tasks_list)):
+                    continue
+                task = tasks_list[task_id]
+                if action == "set-priority":
+                    task.set_priority(value if value else None)
+                elif action == "set-context":
+                    task.set_context(value if value else None)
+                elif action == "set-due":
+                    task.set_due(value if value else None)
+                elif action == "set-project":
+                    task.set_project(value if value else None)
+                else:
+                    return {"error": "unknown action"}, 400
 
         write_tasks(tasks_list, tasks_file)
     return {"ok": True}
@@ -596,9 +630,13 @@ def settings():
                 token    = UserStore.create_verify_token(user["id"])
                 base_url = cfg_get("server", "base_url",
                                    f"http://127.0.0.1:{cfg_int('server','port',8080)}")
-                send_verification_email(new_email, token, base_url)
-                session.clear()
-                return redirect(url_for("verify_pending", email=new_email))
+                ok = send_verification_email(new_email, token, base_url)
+                if not ok:
+                    log.error("settings: verification email failed for %s (user %s)", new_email, user["id"])
+                    errors["email"] = "Email address updated but we could not send the verification email. Contact support."
+                else:
+                    session.clear()
+                    return redirect(url_for("verify_pending", email=new_email))
             except ValueError as e:
                 errors["email"] = str(e)
 

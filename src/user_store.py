@@ -15,7 +15,7 @@ import re
 import secrets
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -64,6 +64,9 @@ def _prefs_path(user_id: str) -> Path:
 def _email_index_path() -> Path:
     return DATA_DIR / "email_index.json"
 
+def _token_index_path() -> Path:
+    return DATA_DIR / "token_index.json"
+
 
 # ---------------------------------------------------------------------------
 # Low-level I/O (atomic writes)
@@ -94,6 +97,20 @@ def _save_email_index(index: dict) -> None:
     _write_json(_email_index_path(), index)
 
 
+def _utcnow() -> datetime:
+    """Timezone-aware-safe UTC now, returned as a naive datetime for storage."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _load_token_index() -> dict:
+    return _read_json(_token_index_path()) or {}
+
+
+def _save_token_index(index: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _write_json(_token_index_path(), index)
+
+
 def _token_hash(plain: str) -> str:
     return hashlib.sha256(plain.encode()).hexdigest()
 
@@ -110,6 +127,10 @@ def _default_prefs() -> dict:
 # ---------------------------------------------------------------------------
 # UserStore
 # ---------------------------------------------------------------------------
+
+# Pre-computed hash used to equalize authenticate() timing when the user doesn't exist.
+_DUMMY_HASH = generate_password_hash("dummy-for-timing-equalization")
+
 
 class UserStore:
     """Stateless — all methods read/write files under data/{uuid}/."""
@@ -141,7 +162,7 @@ class UserStore:
                 "admin":                False,
                 "suspended":            False,
                 "verified":             False,
-                "created_at":           datetime.utcnow().isoformat(),
+                "created_at":           _utcnow().isoformat(),
                 "verify_token_hash":    None,
                 "verify_token_expires": None,
                 "reset_token_hash":     None,
@@ -210,6 +231,7 @@ class UserStore:
         """Returns (user, "") on success or (None, error) on failure."""
         user = cls.get_by_email(email)
         if user is None:
+            check_password_hash(_DUMMY_HASH, password)  # equalize timing
             return None, "Invalid email or password."
         if user.get("suspended"):
             return None, "This account has been suspended."
@@ -231,7 +253,7 @@ class UserStore:
                 return
             p["failed_logins"] = p.get("failed_logins", 0) + 1
             if p["failed_logins"] >= 5:
-                p["locked_until"] = (datetime.utcnow() + timedelta(minutes=15)).isoformat()
+                p["locked_until"] = (_utcnow() + timedelta(minutes=15)).isoformat()
             _write_json(_profile_path(user_id), p)
 
     @classmethod
@@ -253,7 +275,7 @@ class UserStore:
         if not locked_until:
             return False
         try:
-            if datetime.utcnow() >= datetime.fromisoformat(locked_until):
+            if _utcnow() >= datetime.fromisoformat(locked_until):
                 cls.clear_failed_logins(user_id)
                 return False
         except ValueError:
@@ -265,38 +287,50 @@ class UserStore:
     @classmethod
     def create_verify_token(cls, user_id: str) -> str:
         plain = secrets.token_urlsafe(32)
+        h = _token_hash(plain)
+        old_h = None
         with _get_lock(user_id):
             p = _read_json(_profile_path(user_id))
             if p is None:
                 raise ValueError("User not found.")
-            p["verify_token_hash"]    = _token_hash(plain)
-            p["verify_token_expires"] = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+            old_h = p.get("verify_token_hash")
+            p["verify_token_hash"]    = h
+            p["verify_token_expires"] = (_utcnow() + timedelta(hours=24)).isoformat()
             _write_json(_profile_path(user_id), p)
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            if old_h:
+                idx.pop(old_h, None)
+            idx[h] = user_id
+            _save_token_index(idx)
         return plain
 
     @classmethod
     def consume_verify_token(cls, plain_token: str) -> dict | None:
         h = _token_hash(plain_token)
-        for user in cls.list_users():
-            if user.get("verify_token_hash") != h:
-                continue
-            with _get_lock(user["id"]):
-                # Re-read inside lock to avoid TOCTOU
-                p = _read_json(_profile_path(user["id"]))
-                if p is None or p.get("verify_token_hash") != h:
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            user_id = idx.get(h)
+            if user_id is None:
+                return None
+            del idx[h]
+            _save_token_index(idx)
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            stored_h = p.get("verify_token_hash") or "" if p else ""
+            if p is None or not secrets.compare_digest(stored_h, h):
+                return None
+            exp = p.get("verify_token_expires")
+            try:
+                if exp and _utcnow() > datetime.fromisoformat(exp):
                     return None
-                exp = p.get("verify_token_expires")
-                try:
-                    if exp and datetime.utcnow() > datetime.fromisoformat(exp):
-                        return None
-                except ValueError:
-                    return None
-                p["verified"]             = True
-                p["verify_token_hash"]    = None
-                p["verify_token_expires"] = None
-                _write_json(_profile_path(user["id"]), p)
-            return cls.get_user(user["id"])
-        return None
+            except ValueError:
+                return None
+            p["verified"]             = True
+            p["verify_token_hash"]    = None
+            p["verify_token_expires"] = None
+            _write_json(_profile_path(user_id), p)
+        return cls.get_user(user_id)
 
     @classmethod
     def create_reset_token(cls, email: str) -> tuple[str, dict] | tuple[None, None]:
@@ -304,13 +338,22 @@ class UserStore:
         if user is None:
             return None, None
         plain = secrets.token_urlsafe(32)
+        h = _token_hash(plain)
+        old_h = None
         with _get_lock(user["id"]):
             p = _read_json(_profile_path(user["id"]))
             if p is None:
                 return None, None
-            p["reset_token_hash"]    = _token_hash(plain)
-            p["reset_token_expires"] = (datetime.utcnow() + timedelta(hours=1)).isoformat()
+            old_h = p.get("reset_token_hash")
+            p["reset_token_hash"]    = h
+            p["reset_token_expires"] = (_utcnow() + timedelta(hours=1)).isoformat()
             _write_json(_profile_path(user["id"]), p)
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            if old_h:
+                idx.pop(old_h, None)
+            idx[h] = user["id"]
+            _save_token_index(idx)
         return plain, user
 
     @classmethod
@@ -318,28 +361,31 @@ class UserStore:
         if len(new_password) < 8:
             return False
         h = _token_hash(plain_token)
-        for user in cls.list_users():
-            if user.get("reset_token_hash") != h:
-                continue
-            with _get_lock(user["id"]):
-                # Re-read inside lock to avoid TOCTOU
-                p = _read_json(_profile_path(user["id"]))
-                if p is None or p.get("reset_token_hash") != h:
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            user_id = idx.get(h)
+            if user_id is None:
+                return False
+            del idx[h]
+            _save_token_index(idx)
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            stored_h = p.get("reset_token_hash") or "" if p else ""
+            if p is None or not secrets.compare_digest(stored_h, h):
+                return False
+            exp = p.get("reset_token_expires")
+            try:
+                if exp and _utcnow() > datetime.fromisoformat(exp):
                     return False
-                exp = p.get("reset_token_expires")
-                try:
-                    if exp and datetime.utcnow() > datetime.fromisoformat(exp):
-                        return False
-                except ValueError:
-                    return False
-                p["password_hash"]       = generate_password_hash(new_password)
-                p["reset_token_hash"]    = None
-                p["reset_token_expires"] = None
-                p["failed_logins"]       = 0
-                p["locked_until"]        = None
-                _write_json(_profile_path(user["id"]), p)
-            return True
-        return False
+            except ValueError:
+                return False
+            p["password_hash"]       = generate_password_hash(new_password)
+            p["reset_token_hash"]    = None
+            p["reset_token_expires"] = None
+            p["failed_logins"]       = 0
+            p["locked_until"]        = None
+            _write_json(_profile_path(user_id), p)
+        return True
 
     # ── Preferences ───────────────────────────────────────────────────────
 

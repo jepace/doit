@@ -8,9 +8,6 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-
-
 def _write_config(tmp_path, data: dict) -> Path:
     cfg = tmp_path / "config.json"
     cfg.write_text(json.dumps(data), encoding="utf-8")
