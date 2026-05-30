@@ -3,6 +3,7 @@
 Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
 """
 
+import hashlib
 import os
 import re
 import sys
@@ -112,6 +113,11 @@ class Task:
             self.tags[key] = val
         else:
             self.tags.pop(key, None)
+
+    @property
+    def content_hash(self) -> str:
+        """Short hash of the rendered task line — used for optimistic concurrency checks."""
+        return hashlib.md5(self.to_line().encode()).hexdigest()[:8]
 
     def set_due(self, val):        self._set('#due', val)
     def set_priority(self, val):   self._set('#p', val)

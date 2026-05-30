@@ -425,7 +425,7 @@
   <tbody>
   {% for task in tasks %}
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.line_num }}" data-done="{{ task.tags.get('#done', '') }}">
+      data-id="{{ task.line_num }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}">
     <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.line_num }}"
         {% if task.complete %}checked{% endif %}></td>
     <td>
@@ -479,6 +479,7 @@
 {% for task in tasks %}
   <div class="task-card pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %}"
        data-id="{{ task.line_num }}"
+       data-hash="{{ task.content_hash }}"
        data-due="{{ task.due or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
     <div class="card-cb-wrap">
@@ -1186,10 +1187,14 @@ async function deleteTask(id) {
 
 // ── API helper ───────────────────────────────────────────────
 async function apiUpdate(id, field, value) {
+  const el = document.querySelector(`.task-row[data-id="${id}"]`) ||
+             document.querySelector(`.task-card[data-id="${id}"]`);
+  const task_hash = el?.dataset.hash || '';
   const r = await fetch('/tasks/update', {
     method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-    body: JSON.stringify({task_id:id, field, value})
+    body: JSON.stringify({task_id:id, field, value, task_hash})
   });
+  if (r.status === 409) { alert('This task has changed in another tab. Refreshing.'); location.reload(); return {}; }
   return r.ok ? r.json() : {};
 }
 

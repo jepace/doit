@@ -30,7 +30,8 @@ from datetime import date
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from task_manager import read_tasks, DATA_DIR
+import task_manager
+from task_manager import read_tasks
 
 PRIORITY_ORDER = {"top": 0, "high": 1, "medium": 2, "low": 3}
 
@@ -98,7 +99,7 @@ def main():
     while i < len(args):
         a = args[i]
         if a == "--user" and i + 1 < len(args):
-            tasks_file = DATA_DIR / args[i + 1] / "tasks.md"; i += 1
+            tasks_file = task_manager.DATA_DIR / args[i + 1] / "tasks.md"; i += 1
         elif a == "--file" and i + 1 < len(args):
             tasks_file = Path(args[i + 1]); i += 1
         elif a == "--open":

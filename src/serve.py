@@ -73,6 +73,10 @@ if _secret:
     app.secret_key = _secret
 elif _secret_file.exists():
     app.secret_key = _secret_file.read_text().strip()
+    try:
+        os.chmod(_secret_file, 0o600)
+    except OSError:
+        pass
 else:
     _key = os.urandom(24).hex()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -500,10 +504,11 @@ def tasks_add():
 @app.route("/tasks/update", methods=["POST"])
 @require_login
 def tasks_update():
-    data    = request.get_json(silent=True) or {}
-    task_id = data.get("task_id")
-    field   = data.get("field")
-    value   = data.get("value", "").strip()
+    data      = request.get_json(silent=True) or {}
+    task_id   = data.get("task_id")
+    field     = data.get("field")
+    value     = data.get("value", "").strip()
+    task_hash = data.get("task_hash", "")
 
     if task_id is None or field is None:
         return {"error": "missing task_id or field"}, 400
@@ -516,6 +521,11 @@ def tasks_update():
 
         task      = tasks_list[task_id]
         next_task = None
+
+        # Optimistic concurrency check: if the client sent a hash, verify the task
+        # hasn't changed since the page was rendered (e.g. edit in another tab).
+        if task_hash and task.content_hash != task_hash:
+            return {"error": "conflict", "message": "Task has changed — please refresh."}, 409
 
         if field == "description":
             task.description = value
@@ -722,7 +732,9 @@ def admin_resend_verify(user_id):
     if user and not user.get("verified"):
         token = UserStore.create_verify_token(user_id)
         base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
-        send_verification_email(user["email"], token, base_url)
+        ok = send_verification_email(user["email"], token, base_url)
+        if not ok:
+            log.error("admin: resend-verify email failed for %s (user %s)", user["email"], user_id)
     return redirect(url_for("admin_users"))
 
 

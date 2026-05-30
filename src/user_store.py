@@ -7,7 +7,6 @@ User store — all data under data/{uuid}/:
 """
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -30,17 +29,37 @@ _VALID_FONTSIZES = {"small", "medium", "large"}
 _VALID_SORT_COLS = {"due", "priority", "context", "description", "start"}
 _VALID_SORT_DIRS = {"asc", "desc"}
 
-@contextlib.contextmanager
-def _get_lock(key: str):
-    """Exclusive lock for `key`, safe across threads AND processes (fcntl.flock)."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = DATA_DIR / f".{key}.lock"
-    with open(lock_path, "w") as lf:
-        fcntl.flock(lf, fcntl.LOCK_EX)
-        try:
+try:
+    import fcntl as _fcntl
+
+    @contextlib.contextmanager
+    def _get_lock(key: str):
+        """Exclusive cross-process lock via fcntl.flock (Linux, macOS, FreeBSD, BSDs)."""
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        lock_path = DATA_DIR / f".{key}.lock"
+        with open(lock_path, "w") as lf:
+            _fcntl.flock(lf, _fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                _fcntl.flock(lf, _fcntl.LOCK_UN)
+
+except ImportError:
+    # Windows: fcntl unavailable. Thread-safe but not multi-process safe.
+    # Run with a single WSGI worker on Windows.
+    import threading as _threading
+    _locks: dict[str, "_threading.Lock"] = {}
+    _locks_mu = _threading.Lock()
+
+    @contextlib.contextmanager
+    def _get_lock(key: str):
+        """Thread-local lock (Windows fallback — not safe with multiple workers)."""
+        with _locks_mu:
+            if key not in _locks:
+                _locks[key] = _threading.Lock()
+            lock = _locks[key]
+        with lock:
             yield
-        finally:
-            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def get_user_lock(user_id: str):
