@@ -803,6 +803,28 @@ document.querySelectorAll('.sel-cb').forEach(cb => {
 });
 bulkBtn.addEventListener('click', () => bulkDrop.classList.toggle('open'));
 document.addEventListener('click', e => { if (!e.target.closest('.bulk-wrap')) bulkDrop.classList.remove('open'); });
+function collectBulkHashes(ids) {
+  const hashes = {};
+  ids.forEach(id => {
+    const el = document.querySelector(`.task-row[data-id="${id}"]`) ||
+               document.querySelector(`.task-card[data-id="${id}"]`);
+    if (el?.dataset.hash) hashes[String(id)] = el.dataset.hash;
+  });
+  return hashes;
+}
+
+async function apiBulk(action, ids, value) {
+  const task_hashes = collectBulkHashes(ids);
+  const r = await fetch('/tasks/bulk-update', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
+    body: JSON.stringify({action, task_ids:ids, value, task_hashes})
+  });
+  if (r.status === 409) {
+    alert('One or more tasks changed in another tab. Refreshing.');
+  }
+  location.reload();
+}
+
 document.querySelectorAll('.bulk-item').forEach(item => {
   item.addEventListener('click', async () => {
     const action = item.dataset.action;
@@ -811,11 +833,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
 
     if (action === 'delete') {
       if (!confirm(`Delete ${ids.length} task(s)?`)) return;
-      await fetch('/tasks/bulk-update', {
-        method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-        body: JSON.stringify({action:'delete', task_ids:ids, value:''})
-      });
-      location.reload();
+      await apiBulk('delete', ids, '');
       return;
     }
 
@@ -837,11 +855,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
         const val = inp.value;
         ov.remove();
         if (!val) return;
-        await fetch('/tasks/bulk-update', {
-          method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-          body: JSON.stringify({action:'set-due', task_ids:ids, value:val})
-        });
-        location.reload();
+        await apiBulk('set-due', ids, val);
       };
       ov.querySelector('.apply-btn').addEventListener('click', submit);
       ov.querySelector('.cancel-btn').addEventListener('click', () => ov.remove());
@@ -859,11 +873,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
 
     const val = prompt(`Set ${action.replace('set-','')} for ${ids.length} task(s):`);
     if (val === null) return;
-    await fetch('/tasks/bulk-update', {
-      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-      body: JSON.stringify({action, task_ids:ids, value:val})
-    });
-    location.reload();
+    await apiBulk(action, ids, val);
   });
 });
 
@@ -1178,11 +1188,7 @@ document.getElementById('mob-add-overlay').addEventListener('click', closeMobAdd
 // ── Delete task ──────────────────────────────────────────────
 async function deleteTask(id) {
   if (!confirm('Delete this task?')) return;
-  await fetch('/tasks/bulk-update', {
-    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
-    body: JSON.stringify({action:'delete', task_ids:[id], value:''})
-  });
-  location.reload();
+  await apiBulk('delete', [id], '');
 }
 
 // ── API helper ───────────────────────────────────────────────

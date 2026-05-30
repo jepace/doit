@@ -494,3 +494,38 @@ class TestNoAnonymousSession:
         r = client.get("/auth/login")
         assert r.status_code == 200
         assert "Set-Cookie" not in r.headers
+
+
+# ---------------------------------------------------------------------------
+# Bulk update optimistic concurrency
+# ---------------------------------------------------------------------------
+
+class TestBulkConcurrency:
+    def _get_hash(self, authed_client, task_id):
+        from task_manager import read_tasks
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tasks_file = us._user_dir(user["id"]) / "tasks.md"
+        tasks = read_tasks(tasks_file)
+        return tasks[task_id].content_hash
+
+    def _bulk_with_hashes(self, client, action, task_ids, hashes, value=""):
+        return client.post(
+            "/tasks/bulk-update",
+            data=json.dumps({"action": action, "task_ids": task_ids,
+                             "value": value, "task_hashes": hashes}),
+            content_type="application/json",
+        )
+
+    def test_bulk_correct_hash_succeeds(self, authed_client):
+        h = self._get_hash(authed_client, 0)
+        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {"0": h}, "high")
+        assert r.get_json()["ok"] is True
+
+    def test_bulk_wrong_hash_returns_409(self, authed_client):
+        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {"0": "deadbeef"}, "high")
+        assert r.status_code == 409
+
+    def test_bulk_no_hashes_still_works(self, authed_client):
+        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {}, "high")
+        assert r.get_json()["ok"] is True

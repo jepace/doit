@@ -30,7 +30,7 @@ python3 src/tasks.py --file data/<uuid>/tasks.md  # CLI filter by path
 
 **`src/templates/tasks_view.html`** — the main task UI (desktop table + mobile cards).
 
-**`tests/`** — pytest suite (143 tests). Covers task parsing, recurrence, config, user store, and all Flask routes.
+**`tests/`** — pytest suite (170+ tests). Covers task parsing, recurrence, config, user store, mailer, CLI, and all Flask routes.
 
 ## Task format
 
@@ -40,7 +40,9 @@ python3 src/tasks.py --file data/<uuid>/tasks.md  # CLI filter by path
   - [ ] Subtask (indented checkbox preserved as note content)
 ```
 
-Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:context`, `#proj:project`, `#rep:1d/1w/2w/1m/1y`, `#start:YYYY-MM-DD`, `#star`, `#done:YYYY-MM-DD`
+Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:context`, `#proj:project`, `#rep:1d/1w/2w/1m/1y`, `#start:YYYY-MM-DD`, `#s:waiting/blocked/in-progress/someday`, `#star`, `#done:YYYY-MM-DD`
+
+`#s` is a workflow status for tasks that aren't simply open/done — use it for GTD-style states like `waiting` (blocked on someone else), `blocked`, `in-progress`, or `someday` (maybe/later).
 
 ## Data directory layout
 

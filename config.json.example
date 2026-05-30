@@ -7,8 +7,10 @@
     "_https_help": "Set to true when behind a TLS-terminating reverse proxy (nginx+certbot). Enables SESSION_COOKIE_SECURE and trusts X-Forwarded-* headers so real client IPs are used for rate limiting.",
     "base_url": "https://doit.pacehouse.com",
     "_base_url_help": "Used in verification and password-reset emails. Set to your public URL, e.g. https://doit.pacehouse.com",
-    "secret":   "",
-    "_secret_help": "Flask session secret key — signs login cookies. Leave blank to auto-generate (saved to data/.secret). To set manually: python3 -c \"import secrets; print(secrets.token_hex(32))\""
+    "secret":      "",
+    "_secret_help": "Flask session secret key — signs login cookies. Leave blank to auto-generate (saved to data/.secret). To set manually: python3 -c \"import secrets; print(secrets.token_hex(32))\"",
+    "session_days": 30,
+    "_session_days_help": "How long a login session lasts before the cookie expires. Default 30 days."
   },
   "email": {
     "resend_api_key": "",

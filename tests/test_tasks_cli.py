@@ -163,6 +163,25 @@ class TestFilters:
         assert "Due today task" in out
         assert "Future task" not in out
 
+    def test_filter_by_status(self, tmp_path):
+        content = (
+            "# Tasks\n\n## Inbox\n\n"
+            "- [ ] Waiting task #s:waiting\n"
+            "- [ ] Normal task\n"
+        )
+        f = tmp_path / "s.md"
+        f.write_text(content)
+        out, _ = run_cli(["--status", "waiting", "--file", str(f)], f)
+        assert "Waiting task" in out
+        assert "Normal task" not in out
+
+    def test_status_shown_in_output(self, tmp_path):
+        content = "# Tasks\n\n## Inbox\n\n- [ ] Blocked task #s:blocked\n"
+        f = tmp_path / "s.md"
+        f.write_text(content)
+        out, _ = run_cli(["--file", str(f)], f)
+        assert "[blocked]" in out
+
     def test_no_match_exits_zero_with_message(self, tasks_file):
         out, code = run_cli(["--context", "nonexistent_ctx_xyz"], tasks_file)
         assert code == 0

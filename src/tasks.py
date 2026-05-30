@@ -16,6 +16,7 @@ Options:
   --priority P      Filter by priority: top, high, medium, low
   --context C       Filter by context tag (#ctx:C), e.g. work, home
   --project P       Filter by project tag (#proj:P)
+  --status S        Filter by workflow status (#s:S), e.g. waiting, blocked, in-progress, someday
   --due-today       Show tasks due today or overdue
   --overdue         Show tasks with a past due date only
   --star            Show starred tasks only
@@ -73,8 +74,9 @@ def format_task(task, today):
 
     ctx  = f"@{task.context}"  if task.context  else ""
     proj = f"+{task.project}"  if task.project  else ""
+    stat = f"[{task.status}]"  if task.status   else ""
 
-    meta = "  ".join(x for x in [pri, due_str, rep, ctx, proj] if x)
+    meta = "  ".join(x for x in [pri, due_str, rep, ctx, proj, stat] if x)
     line = f"  {status} {star}{task.description}"
     if meta:
         line += f"  [{meta}]"
@@ -90,6 +92,7 @@ def main():
     filter_priority = None
     filter_context  = None
     filter_project  = None
+    filter_status   = None
     due_today_only  = False
     overdue_only    = False
     star_only       = False
@@ -114,6 +117,8 @@ def main():
             filter_context = args[i + 1].lower(); i += 1
         elif a == "--project" and i + 1 < len(args):
             filter_project = args[i + 1].lower(); i += 1
+        elif a == "--status" and i + 1 < len(args):
+            filter_status = args[i + 1].lower(); i += 1
         elif a == "--due-today":
             due_today_only = True
         elif a == "--overdue":
@@ -148,6 +153,7 @@ def main():
         if filter_priority and t.priority != filter_priority: continue
         if filter_context  and t.context  != filter_context:  continue
         if filter_project  and t.project  != filter_project:  continue
+        if filter_status   and t.status   != filter_status:   continue
         if star_only   and "#star" not in t.tags: continue
         if repeat_only and not t.recurrence:      continue
         if due_today_only:

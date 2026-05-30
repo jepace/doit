@@ -16,6 +16,7 @@ import secrets
 import sys
 import threading
 import time
+from datetime import timedelta
 from pathlib import Path
 
 try:
@@ -88,6 +89,7 @@ app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=cfg_bool("server", "https"),
+    PERMANENT_SESSION_LIFETIME=timedelta(days=cfg_int("server", "session_days", 30)),
 )
 
 if cfg_bool("server", "https"):
@@ -309,6 +311,7 @@ def auth_verify(token):
                                error="This verification link is invalid or has expired.")
     log.info("verify: email verified for %s", user.get("email"))
     session.pop("pending_email", None)
+    session.permanent = True
     session["user_id"] = user["id"]
     session["csrf_token"] = secrets.token_hex(32)
     flash("Your email has been verified. Welcome!")
@@ -348,6 +351,7 @@ def auth_login():
             if user:
                 log.info("login: success for %s from %s", email, ip)
                 session.clear()
+                session.permanent = True
                 session["user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_hex(32)
                 next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
@@ -541,6 +545,8 @@ def tasks_update():
             task.set_recurrence(value if value else None)
         elif field == "start":
             task.set_start(value if value else None)
+        elif field == "status":
+            task.set_status(value if value else None)
         elif field == "notes":
             task.set_notes(value)
         elif field == "complete":
@@ -574,10 +580,11 @@ def tasks_update():
 @app.route("/tasks/bulk-update", methods=["POST"])
 @require_login
 def tasks_bulk_update():
-    data     = request.get_json(silent=True) or {}
-    action   = data.get("action")
-    task_ids = data.get("task_ids", [])
-    value    = data.get("value", "").strip()
+    data        = request.get_json(silent=True) or {}
+    action      = data.get("action")
+    task_ids    = data.get("task_ids", [])
+    value       = data.get("value", "").strip()
+    task_hashes = data.get("task_hashes", {})  # {task_id (str): hash}
 
     if action is None:
         return {"error": "missing action"}, 400
@@ -585,6 +592,15 @@ def tasks_bulk_update():
     with get_user_lock(g.user["id"]):
         tasks_file = _get_tasks_file()
         tasks_list = read_tasks(tasks_file)
+
+        # Optimistic concurrency: verify all affected tasks haven't changed.
+        if task_hashes:
+            for task_id in task_ids:
+                expected = task_hashes.get(str(task_id))
+                if expected and 0 <= task_id < len(tasks_list):
+                    if tasks_list[task_id].content_hash != expected:
+                        return {"error": "conflict",
+                                "message": "One or more tasks changed — please refresh."}, 409
 
         if action == "delete":
             delete_ids = set(task_ids)
