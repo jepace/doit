@@ -97,11 +97,33 @@ def get_csrf(client):
 
 @pytest.fixture()
 def authed_client(client):
-    """Flask test client already logged in as TEST_EMAIL."""
+    """Flask test client already logged in as TEST_EMAIL.
+
+    JSON POSTs automatically receive the X-CSRF-Token header so tests don't
+    have to include it manually.
+    """
     import user_store as us
 
     user = us.UserStore.get_by_email(TEST_EMAIL)
     with client.session_transaction() as sess:
         sess["user_id"]    = user["id"]
         sess["csrf_token"] = "testcsrf"
-    return client
+    return _AutoCsrfClient(client, "testcsrf")
+
+
+class _AutoCsrfClient:
+    """Wraps a Flask test client and injects X-CSRF-Token for JSON requests."""
+
+    def __init__(self, client, token: str):
+        self._c = client
+        self._token = token
+
+    def post(self, *args, **kwargs):
+        if kwargs.get("content_type") == "application/json":
+            headers = dict(kwargs.pop("headers", None) or {})
+            headers.setdefault("X-CSRF-Token", self._token)
+            kwargs["headers"] = headers
+        return self._c.post(*args, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._c, name)

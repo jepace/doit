@@ -6,11 +6,11 @@ From Opus code review. Prioritised: Critical → High → Medium → Low.
 
 ## CRITICAL
 
-- [ ] **C1** `src/serve.py:110-118` — CSRF bypass on all JSON endpoints (`/tasks/toggle`, `/tasks/add`, `/tasks/update`, `/tasks/bulk-update`). The `is_json` exemption is not safe. Fix: validate CSRF via `X-CSRF-Token` header or include token in JSON body.
+- [x] **C1** `src/serve.py:110-118` — CSRF bypass on all JSON endpoints (`/tasks/toggle`, `/tasks/add`, `/tasks/update`, `/tasks/bulk-update`). The `is_json` exemption is not safe. Fix: validate CSRF via `X-CSRF-Token` header or include token in JSON body.
 
-- [ ] **C2** `src/serve.py:381-413`, `src/task_manager.py:227-264` — `_toggle_task` and `_add_task` use `write_text` directly (not atomic). A crash mid-write truncates `tasks.md`. Fix: write via tmp file + `os.replace` like `_write_json` does.
+- [x] **C2** `src/serve.py:381-413`, `src/task_manager.py:227-264` — `_toggle_task` and `_add_task` use `write_text` directly (not atomic). A crash mid-write truncates `tasks.md`. Fix: write via tmp file + `os.replace` like `_write_json` does.
 
-- [ ] **C3** `src/user_store.py:33-46` — `threading.Lock` is per-process; useless under multi-worker gunicorn/uWSGI. Concurrent workers can corrupt `tasks.md` and `email_index.json`. Fix: use `fcntl.flock` for OS-level file locking, or enforce single-worker and document it.
+- [x] **C3** `src/user_store.py:33-46` — `threading.Lock` is per-process; useless under multi-worker gunicorn/uWSGI. Concurrent workers can corrupt `tasks.md` and `email_index.json`. Fix: use `fcntl.flock` for OS-level file locking, or enforce single-worker and document it.
 
 ---
 

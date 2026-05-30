@@ -561,6 +561,7 @@
 </div>
 
 <script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 const today = new Date().toLocaleDateString('en-CA');
 document.getElementById('f-due').value = today;
 document.getElementById('f-start').value = today;
@@ -810,7 +811,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
     if (action === 'delete') {
       if (!confirm(`Delete ${ids.length} task(s)?`)) return;
       await fetch('/tasks/bulk-update', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
         body: JSON.stringify({action:'delete', task_ids:ids, value:''})
       });
       location.reload();
@@ -836,7 +837,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
         ov.remove();
         if (!val) return;
         await fetch('/tasks/bulk-update', {
-          method:'POST', headers:{'Content-Type':'application/json'},
+          method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
           body: JSON.stringify({action:'set-due', task_ids:ids, value:val})
         });
         location.reload();
@@ -858,7 +859,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
     const val = prompt(`Set ${action.replace('set-','')} for ${ids.length} task(s):`);
     if (val === null) return;
     await fetch('/tasks/bulk-update', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
       body: JSON.stringify({action, task_ids:ids, value:val})
     });
     location.reload();
@@ -1105,7 +1106,7 @@ async function addTask() {
 
   const fullText = `${text} ${tags.join(' ')}`;
   const res = await fetch('/tasks/add', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
     body: JSON.stringify({text: fullText, section:'Inbox'})
   });
   if (res.ok) {
@@ -1161,7 +1162,7 @@ async function addMobTask() {
 
   const fullText = `${text} ${tags.join(' ')}`;
   const res = await fetch('/tasks/add', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
     body: JSON.stringify({text: fullText, section:'Inbox'})
   });
   if (res.ok) { location.reload(); }
@@ -1177,7 +1178,7 @@ document.getElementById('mob-add-overlay').addEventListener('click', closeMobAdd
 async function deleteTask(id) {
   if (!confirm('Delete this task?')) return;
   await fetch('/tasks/bulk-update', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
     body: JSON.stringify({action:'delete', task_ids:[id], value:''})
   });
   location.reload();
@@ -1186,7 +1187,7 @@ async function deleteTask(id) {
 // ── API helper ───────────────────────────────────────────────
 async function apiUpdate(id, field, value) {
   const r = await fetch('/tasks/update', {
-    method:'POST', headers:{'Content-Type':'application/json'},
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
     body: JSON.stringify({task_id:id, field, value})
   });
   return r.ok ? r.json() : {};

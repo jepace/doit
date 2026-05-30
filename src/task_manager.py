@@ -3,6 +3,7 @@
 Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -18,6 +19,13 @@ DATA_DIR  = REPO_ROOT / "data"
 def get_tasks_file(user_id: str) -> Path:
     """Return the tasks.md path for the given user."""
     return DATA_DIR / user_id / "tasks.md"
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    """Write content to path via a temp file so a crash never leaves a partial write."""
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, path)
 
 
 class Task:
@@ -261,7 +269,7 @@ def write_tasks(tasks, tasks_file: Path):
         new_lines.append(line)
         i += 1
 
-    tasks_file.write_text('\n'.join(new_lines), encoding='utf-8')
+    _write_text_atomic(tasks_file, '\n'.join(new_lines))
 
 
 def get_all_contexts(tasks_file: Path):

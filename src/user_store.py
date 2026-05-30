@@ -6,13 +6,14 @@ User store — all data under data/{uuid}/:
   tasks.md          per-user tasks
 """
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import re
 import secrets
 import shutil
-import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -29,19 +30,20 @@ _VALID_FONTSIZES = {"small", "medium", "large"}
 _VALID_SORT_COLS = {"due", "priority", "context", "description", "start"}
 _VALID_SORT_DIRS = {"asc", "desc"}
 
-# Per-key locks for atomic writes (keyed by user_id or "email_index")
-_locks: dict[str, threading.Lock] = {}
-_locks_mu = threading.Lock()
+@contextlib.contextmanager
+def _get_lock(key: str):
+    """Exclusive lock for `key`, safe across threads AND processes (fcntl.flock)."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = DATA_DIR / f".{key}.lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
-def _get_lock(key: str) -> threading.Lock:
-    with _locks_mu:
-        if key not in _locks:
-            _locks[key] = threading.Lock()
-        return _locks[key]
-
-
-def get_user_lock(user_id: str) -> threading.Lock:
+def get_user_lock(user_id: str):
     """Public: per-user lock, shared across profile and tasks file writes."""
     return _get_lock(user_id)
 

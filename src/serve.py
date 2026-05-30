@@ -28,7 +28,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
-                          get_all_projects, get_tasks_file, DATA_DIR)
+                          get_all_projects, get_tasks_file, DATA_DIR,
+                          _write_text_atomic)
 from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
@@ -100,19 +101,25 @@ def generate_csrf() -> str:
 
 
 def validate_csrf() -> bool:
-    form_token = request.form.get("_csrf_token", "")
     session_token = session.get("csrf_token", "")
-    if not form_token or not session_token:
+    if not session_token:
         return False
-    return secrets.compare_digest(form_token, session_token)
+    # JSON endpoints send the token as a request header; forms send it as a field.
+    if request.is_json:
+        client_token = request.headers.get("X-CSRF-Token", "")
+    else:
+        client_token = request.form.get("_csrf_token", "")
+    if not client_token:
+        return False
+    return secrets.compare_digest(client_token, session_token)
 
 
 @app.before_request
 def csrf_protect():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    # Skip CSRF check for JSON API endpoints (they use session auth + same-origin)
-    if request.is_json:
+    # No session = no authenticated user; let require_login handle the redirect.
+    if not session.get("csrf_token"):
         return
     if not validate_csrf():
         abort(403)
@@ -392,7 +399,7 @@ def _toggle_task(line_num: int, action: str) -> bool:
                     lines[i] = re.sub(r"\[ \]", "[x]", lines[i], count=1)
                 else:
                     lines[i] = re.sub(r"\[x\]", "[ ]", lines[i], count=1)
-                tasks_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                _write_text_atomic(tasks_file, "\n".join(lines) + "\n")
                 return True
             task_count += 1
     return False
@@ -410,7 +417,7 @@ def _add_task(text: str, section: str = "Inbox") -> None:
         content = content[:insert_pos] + f"\n- [ ] {text}" + content[insert_pos:]
     else:
         content = content.rstrip() + f"\n\n{section_header}\n\n- [ ] {text}\n"
-    tasks_file.write_text(content, encoding="utf-8")
+    _write_text_atomic(tasks_file, content)
 
 
 # ---------------------------------------------------------------------------
