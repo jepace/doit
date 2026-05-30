@@ -324,3 +324,65 @@ class TestReadWriteTasks:
         tasks = read_tasks(tmp_tasks_file)
         for i, t in enumerate(tasks):
             assert t.line_num == i
+
+    def test_indented_checkbox_preserved_as_note(self, tmp_tasks_file):
+        """M6: indented checkboxes must survive a read/write round-trip as notes."""
+        content = (
+            "# Tasks\n\n## Inbox\n\n"
+            "- [ ] Parent task\n"
+            "  - [ ] Subtask one\n"
+            "  - [ ] Subtask two\n"
+            "- [ ] Other task\n"
+        )
+        tmp_tasks_file.write_text(content, encoding="utf-8")
+        tasks = read_tasks(tmp_tasks_file)
+        # Indented checkboxes should be captured as notes, not as extra tasks
+        assert len(tasks) == 2
+        assert "Subtask one" in tasks[0].raw_notes
+        assert "Subtask two" in tasks[0].raw_notes
+
+    def test_indented_checkbox_round_trip(self, tmp_tasks_file):
+        """M6: indented checkboxes must not be flattened into top-level tasks."""
+        content = (
+            "# Tasks\n\n## Inbox\n\n"
+            "- [ ] Parent task\n"
+            "  - [ ] Subtask\n"
+            "- [ ] Sibling task\n"
+        )
+        tmp_tasks_file.write_text(content, encoding="utf-8")
+        tasks = read_tasks(tmp_tasks_file)
+        write_tasks(tasks, tmp_tasks_file)
+        after = read_tasks(tmp_tasks_file)
+        assert len(after) == 2
+        assert after[0].description == "Parent task"
+        assert after[1].description == "Sibling task"
+
+    def test_write_tasks_extra_lines(self, tmp_tasks_file):
+        """M1: extra_lines are appended atomically in the same write."""
+        tasks = read_tasks(tmp_tasks_file)
+        write_tasks(tasks, tmp_tasks_file, extra_lines=["- [ ] Appended task"])
+        after = read_tasks(tmp_tasks_file)
+        descriptions = [t.description for t in after]
+        assert "Appended task" in descriptions
+
+
+class TestRecurrenceBadDue:
+    """M9: malformed #due must not raise in get_next_recurrence."""
+
+    def test_malformed_due_falls_back_to_today(self):
+        from datetime import date
+        task = Task("- [ ] Broken due #due:not-a-date #rep:1w", 0)
+        task.complete_task()
+        next_task = task.get_next_recurrence()
+        assert next_task is not None
+        # Due date should be today + 7 days (fell back to today as base)
+        expected = (date.today() + __import__("datetime").timedelta(weeks=1)).isoformat()
+        assert next_task.due == expected
+
+    def test_missing_due_falls_back_to_today(self):
+        from datetime import date, timedelta
+        task = Task("- [ ] No due #rep:1d", 0)
+        task.complete_task()
+        next_task = task.get_next_recurrence()
+        assert next_task is not None
+        assert next_task.due == (date.today() + timedelta(days=1)).isoformat()

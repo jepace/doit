@@ -87,6 +87,39 @@ class TestCfgBool:
         from config import cfg_bool
         assert cfg_bool("nope", "key", False) is False
 
+    def test_string_false_returns_false(self, tmp_path, monkeypatch):
+        """L4: string "false" must not evaluate to True via bool()."""
+        import config
+        cfg_path = _write_config(tmp_path, {"server": {"https": "false"}})
+        monkeypatch.setattr(config, "_CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(config, "_mtime", 0.0)
+        config._load()
+        assert config.cfg_bool("server", "https") is False
+
+    def test_string_zero_returns_false(self, tmp_path, monkeypatch):
+        import config
+        cfg_path = _write_config(tmp_path, {"server": {"https": "0"}})
+        monkeypatch.setattr(config, "_CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(config, "_mtime", 0.0)
+        config._load()
+        assert config.cfg_bool("server", "https") is False
+
+    def test_string_true_returns_true(self, tmp_path, monkeypatch):
+        import config
+        cfg_path = _write_config(tmp_path, {"server": {"https": "true"}})
+        monkeypatch.setattr(config, "_CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(config, "_mtime", 0.0)
+        config._load()
+        assert config.cfg_bool("server", "https") is True
+
+    def test_json_bool_true_returns_true(self, tmp_path, monkeypatch):
+        import config
+        cfg_path = _write_config(tmp_path, {"server": {"https": True}})
+        monkeypatch.setattr(config, "_CONFIG_FILE", cfg_path)
+        monkeypatch.setattr(config, "_mtime", 0.0)
+        config._load()
+        assert config.cfg_bool("server", "https") is True
+
 
 class TestReloadOnChange:
     def test_reload_detects_change(self, tmp_path, monkeypatch):

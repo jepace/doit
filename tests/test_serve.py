@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from conftest import TEST_EMAIL, TEST_PASSWORD, get_csrf
+from conftest import STOCK_TASKS
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +300,197 @@ class TestBulkUpdate:
     def test_bulk_unauthenticated_redirects(self, client):
         r = self._bulk(client, "set-priority", [0], "high")
         assert r.status_code == 302
+
+    def test_bulk_delete_removes_task_from_file(self, authed_client):
+        """M3: deleted tasks must be absent from the file, not written as [DELETED]."""
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tasks_file = us._user_dir(user["id"]) / "tasks.md"
+
+        from task_manager import read_tasks
+        before = read_tasks(tasks_file)
+        count_before = len(before)
+
+        r = self._bulk(authed_client, "delete", [0])
+        assert r.get_json()["ok"] is True
+
+        after = read_tasks(tasks_file)
+        assert len(after) == count_before - 1
+        assert all("[DELETED]" not in t.description for t in after)
+
+
+# ---------------------------------------------------------------------------
+# Recurrence — atomic write (M1)
+# ---------------------------------------------------------------------------
+
+class TestRecurrenceAtomicWrite:
+    def test_completing_recurring_task_writes_next_in_one_pass(self, authed_client):
+        """M1: recurrence task must appear in the file after a single write."""
+        import user_store as us
+        from task_manager import read_tasks
+
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tasks_file = us._user_dir(user["id"]) / "tasks.md"
+
+        # Write report (#rep:1w) is task index 3 in STOCK_TASKS
+        tasks = read_tasks(tasks_file)
+        recurring_idx = next(i for i, t in enumerate(tasks) if t.recurrence)
+
+        r = authed_client.post(
+            "/tasks/update",
+            data=json.dumps({"task_id": recurring_idx, "field": "complete", "value": "true"}),
+            content_type="application/json",
+        )
+        assert r.get_json()["ok"] is True
+
+        after = read_tasks(tasks_file)
+        # There should now be one more task (the next recurrence)
+        assert len(after) == len(tasks) + 1
+        new_task = after[-1]
+        assert new_task.recurrence == "1w"
+        assert not new_task.complete
+
+
+# ---------------------------------------------------------------------------
+# Security — CSRF enforcement on JSON endpoints (C1)
+# ---------------------------------------------------------------------------
+
+class TestCsrfEnforcement:
+    def test_json_post_without_csrf_header_returns_403(self, client):
+        """Authenticated JSON POST without X-CSRF-Token must be rejected."""
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        with client.session_transaction() as sess:
+            sess["user_id"]    = user["id"]
+            sess["csrf_token"] = "secret"
+        # Post without the header
+        r = client.post(
+            "/tasks/add",
+            data=json.dumps({"text": "sneak"}),
+            content_type="application/json",
+        )
+        assert r.status_code == 403
+
+    def test_json_post_with_wrong_csrf_header_returns_403(self, client):
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        with client.session_transaction() as sess:
+            sess["user_id"]    = user["id"]
+            sess["csrf_token"] = "secret"
+        r = client.post(
+            "/tasks/add",
+            data=json.dumps({"text": "sneak"}),
+            content_type="application/json",
+            headers={"X-CSRF-Token": "wrong"},
+        )
+        assert r.status_code == 403
+
+    def test_json_post_with_correct_csrf_header_succeeds(self, authed_client):
+        r = authed_client.post(
+            "/tasks/add",
+            data=json.dumps({"text": "legit task"}),
+            content_type="application/json",
+        )
+        assert r.get_json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Security — _ip() and _safe_next (H2, L3)
+# ---------------------------------------------------------------------------
+
+class TestIpAndSafeNext:
+    def test_ip_ignores_x_forwarded_for_without_proxy(self, client):
+        """H2: X-Forwarded-For must not be trusted when ProxyFix is inactive."""
+        import serve
+        with serve.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "1.2.3.4"},
+            headers={"X-Forwarded-For": "9.9.9.9"},
+        ):
+            assert serve._ip() == "1.2.3.4"
+
+    def test_safe_next_rejects_protocol_relative(self):
+        """L3: //evil.com must be rejected."""
+        import serve
+        with serve.app.test_request_context("/"):
+            assert serve._safe_next("//evil.com/steal") == "/tasks"
+
+    def test_safe_next_rejects_backslash_protocol_relative(self):
+        import serve
+        with serve.app.test_request_context("/"):
+            assert serve._safe_next("/\\evil.com") == "/tasks"
+
+    def test_safe_next_rejects_absolute_url(self):
+        import serve
+        with serve.app.test_request_context("/"):
+            assert serve._safe_next("https://evil.com") == "/tasks"
+
+    def test_safe_next_allows_relative_path(self):
+        import serve
+        with serve.app.test_request_context("/"):
+            assert serve._safe_next("/tasks") == "/tasks"
+
+
+# ---------------------------------------------------------------------------
+# Auth — unverified login does NOT auto-resend email (H3b)
+# ---------------------------------------------------------------------------
+
+class TestUnverifiedLogin:
+    def test_unverified_login_redirects_to_verify_pending(self, client, monkeypatch):
+        """H3b: login with unverified account must redirect without sending email."""
+        import user_store as us
+        import serve
+
+        sent = []
+        monkeypatch.setattr(serve, "send_verification_email", lambda *a, **kw: sent.append(a) or True)
+
+        # Create unverified user
+        us.UserStore.create_user("unverif@example.com", TEST_PASSWORD)
+        csrf = get_csrf(client)
+        r = client.post("/auth/login", data={
+            "email": "unverif@example.com",
+            "password": TEST_PASSWORD,
+            "_csrf_token": csrf,
+        })
+        assert r.status_code == 302
+        assert "verify" in r.headers["Location"]
+        assert sent == [], "No verification email should be sent automatically on login"
+
+
+# ---------------------------------------------------------------------------
+# Resend-verify — rate limiting (M4)
+# ---------------------------------------------------------------------------
+
+class TestResendVerifyRateLimit:
+    def test_resend_verify_rate_limited_by_ip(self, client, monkeypatch):
+        """M4: resend-verify must be rate-limited."""
+        import serve
+        monkeypatch.setattr(serve, "send_verification_email", lambda *a, **kw: True)
+
+        import user_store as us
+        us.UserStore.create_user("rl@example.com", TEST_PASSWORD)
+
+        # Exhaust the 3/hour limit
+        for _ in range(3):
+            csrf = get_csrf(client)
+            client.post("/auth/resend-verify", data={"email": "rl@example.com", "_csrf_token": csrf})
+
+        sent_after_limit = []
+        monkeypatch.setattr(serve, "send_verification_email",
+                            lambda *a, **kw: sent_after_limit.append(a) or True)
+
+        csrf = get_csrf(client)
+        client.post("/auth/resend-verify", data={"email": "rl@example.com", "_csrf_token": csrf})
+        assert sent_after_limit == [], "Email must not be sent once rate limit is hit"
+
+
+# ---------------------------------------------------------------------------
+# Anonymous sessions — no cookie created for GET requests (L6)
+# ---------------------------------------------------------------------------
+
+class TestNoAnonymousSession:
+    def test_anon_get_login_does_not_set_session_cookie(self, client):
+        """L6: anonymous GET must not create a session / set a cookie."""
+        r = client.get("/auth/login")
+        assert r.status_code == 200
+        assert "Set-Cookie" not in r.headers
