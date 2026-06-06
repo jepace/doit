@@ -425,66 +425,66 @@
   <tbody>
   {% for task in tasks %}
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.line_num }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}">
-    <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.line_num }}"
+      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}">
+    <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}"
         {% if task.complete %}checked{% endif %}></td>
     <td>
       <span class="ecell task-name-text{% if not task.description %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="description">{{ task.description or '—' }}</span>{% if task.complete and task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
+            data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.complete and task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
     </td>
     <td>
       <span class="ecell{% if not task.context %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="context">{{ task.context or '—' }}</span>
+            data-id="{{ task.id }}" data-field="context">{{ task.context or '—' }}</span>
     </td>
     <td>
       <span class="ecell{% if not task.due %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="due">{{ task.due or '—' }}</span>
+            data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span>
     </td>
     <td>
       <span class="ecell{% if not task.recurrence %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="recurrence">{{ task.recurrence or '—' }}</span>
+            data-id="{{ task.id }}" data-field="recurrence">{{ task.recurrence or '—' }}</span>
     </td>
     <td>
       <span class="ecell{% if not task.priority %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span>
+            data-id="{{ task.id }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span>
     </td>
     <td>
       <span class="ecell{% if not task.start %} empty{% endif %}"
-            data-id="{{ task.line_num }}" data-field="start">{{ task.start or '—' }}</span>
+            data-id="{{ task.id }}" data-field="start">{{ task.start or '—' }}</span>
     </td>
     <td style="display:flex; gap:4px; justify-content:center; align-items:center;">
       <button class="note-btn{% if task.notes %} has-note{% endif %}"
-              data-id="{{ task.line_num }}">{% if task.notes %}📝{% else %}+{% endif %}</button>
+              data-id="{{ task.id }}">{% if task.notes %}📝{% else %}+{% endif %}</button>
       <button class="note-btn" title="Delete" style="color:var(--danger); opacity:.6;"
-              onclick="deleteTask({{ task.line_num }})">✕</button>
+              onclick="deleteTask('{{ task.id }}')">✕</button>
     </td>
-    <td><input type="checkbox" class="sel-cb" data-id="{{ task.line_num }}"></td>
+    <td><input type="checkbox" class="sel-cb" data-id="{{ task.id }}"></td>
   </tr>
-  <tr class="note-row" data-id="{{ task.line_num }}">
+  <tr class="note-row" data-id="{{ task.id }}">
     <td colspan="9">
-      <textarea class="note-textarea" data-id="{{ task.line_num }}"
+      <textarea class="note-textarea" data-id="{{ task.id }}"
                 placeholder="Notes…">{{ task.notes }}</textarea>
       <div class="note-actions">
-        <button onclick="saveNote({{ task.line_num }})">Save</button>
-        <button onclick="closeNote({{ task.line_num }})">Cancel</button>
+        <button onclick="saveNote('{{ task.id }}')">Save</button>
+        <button onclick="closeNote('{{ task.id }}')">Cancel</button>
       </div>
     </td>
   </tr>
   {% endfor %}
   {% for task in archive_tasks %}
   <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.line_num }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}" style="display:none">
-    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.line_num }}" checked></td>
+      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}" style="display:none">
+    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}" checked></td>
     <td class="col-task">
-      <span class="ecell" data-id="{{ task.line_num }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
+      <span class="ecell" data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
     </td>
-    <td class="col-ctx"><span class="ecell{% if not task.context %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="context">{{ task.context or '—' }}</span></td>
-    <td class="col-due"><span class="ecell{% if not task.due %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="due">{{ task.due or '—' }}</span></td>
-    <td class="col-rep"><span class="ecell{% if not task.recurrence %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="recurrence">{{ task.recurrence or '—' }}</span></td>
-    <td class="col-pri"><span class="ecell{% if not task.priority %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span></td>
-    <td class="col-start"><span class="ecell{% if not task.start %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="start">{{ task.start or '—' }}</span></td>
+    <td class="col-ctx"><span class="ecell{% if not task.context %} empty{% endif %}" data-id="{{ task.id }}" data-field="context">{{ task.context or '—' }}</span></td>
+    <td class="col-due"><span class="ecell{% if not task.due %} empty{% endif %}" data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span></td>
+    <td class="col-rep"><span class="ecell{% if not task.recurrence %} empty{% endif %}" data-id="{{ task.id }}" data-field="recurrence">{{ task.recurrence or '—' }}</span></td>
+    <td class="col-pri"><span class="ecell{% if not task.priority %} empty{% endif %}" data-id="{{ task.id }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span></td>
+    <td class="col-start"><span class="ecell{% if not task.start %} empty{% endif %}" data-id="{{ task.id }}" data-field="start">{{ task.start or '—' }}</span></td>
     <td class="col-note"></td>
-    <td class="col-sel"><input type="checkbox" class="sel-cb" data-id="{{ task.line_num }}" style="display:block;margin:0 auto"></td>
+    <td class="col-sel"><input type="checkbox" class="sel-cb" data-id="{{ task.id }}" style="display:block;margin:0 auto"></td>
   </tr>
   {% endfor %}
   </tbody>
@@ -494,49 +494,49 @@
 <div class="task-cards-list" id="card-list">
 {% for task in tasks %}
   <div class="task-card pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %}"
-       data-id="{{ task.line_num }}"
+       data-id="{{ task.id }}"
        data-hash="{{ task.content_hash }}"
        data-due="{{ task.due or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
     <div class="card-cb-wrap">
       <input type="checkbox" class="card-cb"
-             data-id="{{ task.line_num }}"
+             data-id="{{ task.id }}"
              {% if task.complete %}checked{% endif %}>
     </div>
     <div class="card-main">
       <div class="card-title ecell task-name-text"
-           data-id="{{ task.line_num }}" data-field="description">{{ task.description or '—' }}</div>
+           data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</div>
       <div class="card-meta">
         <span class="card-due ecell{% if not task.due %} empty{% endif %}"
-              data-id="{{ task.line_num }}" data-field="due">{{ task.due or '—' }}</span>
+              data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span>
         {% if task.context %}<span class="card-ctx ecell"
-              data-id="{{ task.line_num }}" data-field="context">{{ task.context }}</span>{% endif %}
+              data-id="{{ task.id }}" data-field="context">{{ task.context }}</span>{% endif %}
         {% if task.recurrence %}<span class="card-rec" title="{{ task.recurrence }}">🔁</span>{% endif %}
       </div>
     </div>
     <div class="card-right">
       <button class="card-note-btn{% if task.notes %} has-note{% endif %}"
-              data-id="{{ task.line_num }}">{% if task.notes %}📝{% else %}＋{% endif %}</button>
+              data-id="{{ task.id }}">{% if task.notes %}📝{% else %}＋{% endif %}</button>
     </div>
   </div>
-  <div class="card-note-row" data-id="{{ task.line_num }}">
-    <textarea class="note-textarea" data-id="{{ task.line_num }}"
+  <div class="card-note-row" data-id="{{ task.id }}">
+    <textarea class="note-textarea" data-id="{{ task.id }}"
               placeholder="Notes…">{{ task.notes }}</textarea>
     <div class="note-actions">
-      <button onclick="saveNote({{ task.line_num }})">Save</button>
-      <button onclick="closeNote({{ task.line_num }})">Cancel</button>
+      <button onclick="saveNote('{{ task.id }}')">Save</button>
+      <button onclick="closeNote('{{ task.id }}')">Cancel</button>
     </div>
   </div>
 {% endfor %}
 {% for task in archive_tasks %}
 <div class="task-card completed pri-{{ task.priority or 'none' }}"
-     data-id="{{ task.line_num }}"
+     data-id="{{ task.id }}"
      data-hash="{{ task.content_hash }}"
      data-complete="true"
      style="display:none">
   <div style="display:flex;align-items:center;gap:8px">
-    <input type="checkbox" class="card-cb" data-id="{{ task.line_num }}" checked>
-    <div class="card-task-name"><span data-id="{{ task.line_num }}" data-field="description">{{ task.description }}</span>{% if task.tags.get('#done') %} <span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}</div>
+    <input type="checkbox" class="card-cb" data-id="{{ task.id }}" checked>
+    <div class="card-task-name"><span data-id="{{ task.id }}" data-field="description">{{ task.description }}</span>{% if task.tags.get('#done') %} <span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}</div>
   </div>
 </div>
 {% endfor %}
@@ -627,7 +627,7 @@ applyShowDone();
 // ── Done checkbox (table) ────────────────────────────────────
 document.querySelectorAll('.primary-cb').forEach(cb => {
   cb.addEventListener('change', async (e) => {
-    const id = parseInt(cb.dataset.id);
+    const id = cb.dataset.id;
     const row = document.querySelector(`.task-row[data-id="${id}"]`);
     const card = document.querySelector(`.task-card[data-id="${id}"]`);
     // Sync card checkbox
@@ -689,7 +689,7 @@ const REPEAT_MAP = {
 };
 
 function makeEditable(span) {
-  const id    = parseInt(span.dataset.id);
+  const id    = span.dataset.id;
   const field = span.dataset.field;
   const curText = span.textContent.trim();
   const curVal  = (curText === '—' || curText === '') ? '' : curText;
@@ -856,7 +856,7 @@ async function apiBulk(action, ids, value) {
 document.querySelectorAll('.bulk-item').forEach(item => {
   item.addEventListener('click', async () => {
     const action = item.dataset.action;
-    const ids = [...document.querySelectorAll('.sel-cb:checked')].map(c => parseInt(c.dataset.id));
+    const ids = [...document.querySelectorAll('.sel-cb:checked')].map(c => c.dataset.id);
     bulkDrop.classList.remove('open');
 
     if (action === 'delete') {

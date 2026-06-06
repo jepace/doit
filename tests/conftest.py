@@ -13,13 +13,13 @@ STOCK_TASKS = """\
 
 ## Inbox
 
-- [ ] Buy milk #p:low #due:2026-06-01
-- [ ] Call dentist #p:high #ctx:phone
-- [x] Pay bills #done:2026-05-01
+- [ ] Buy milk #due:2026-06-01 #id:aa0001 #p:low
+- [ ] Call dentist #ctx:phone #id:aa0002 #p:high
+- [x] Pay bills #done:2026-05-01 #id:aa0003
 
 ## Work
 
-- [ ] Write report #p:high #proj:acme #due:2026-05-30 #rep:1w
+- [ ] Write report #due:2026-05-30 #id:aa0004 #p:high #proj:acme #rep:1w
 """
 
 TEST_EMAIL    = "test@example.com"

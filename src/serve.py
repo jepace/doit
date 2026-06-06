@@ -430,38 +430,25 @@ def _get_tasks_file():
     return get_tasks_file(g.user["id"])
 
 
-def _toggle_task(line_num: int, action: str) -> bool:
-    tasks_file = _get_tasks_file()
-    if not tasks_file.exists():
-        return False
-    lines = tasks_file.read_text(encoding="utf-8").splitlines()
-
-    task_count = 0
-    for i, line in enumerate(lines):
-        if re.match(r"^\s*- \[[x ]\]", line):
-            if task_count == line_num:
-                if action == "complete":
-                    lines[i] = re.sub(r"\[ \]", "[x]", lines[i], count=1)
-                else:
-                    lines[i] = re.sub(r"\[x\]", "[ ]", lines[i], count=1)
-                _write_text_atomic(tasks_file, "\n".join(lines) + "\n")
-                return True
-            task_count += 1
-    return False
+def _find_task_by_id(tasks_list: list, task_id: str):
+    """Look up a task by its stable #id tag."""
+    return next((t for t in tasks_list if t.id == task_id), None)
 
 
 def _add_task(text: str, section: str = "Inbox") -> None:
+    from task_manager import _new_id
     tasks_file = _get_tasks_file()
     if not tasks_file.exists():
         tasks_file.parent.mkdir(parents=True, exist_ok=True)
         tasks_file.write_text("# Tasks\n\n## Inbox\n\n", encoding="utf-8")
     content = tasks_file.read_text(encoding="utf-8")
+    new_line = f"- [ ] {text} #id:{_new_id()}"
     section_header = f"## {section}"
     if section_header in content:
         insert_pos = content.index(section_header) + len(section_header)
-        content = content[:insert_pos] + f"\n- [ ] {text}" + content[insert_pos:]
+        content = content[:insert_pos] + f"\n{new_line}" + content[insert_pos:]
     else:
-        content = content.rstrip() + f"\n\n{section_header}\n\n- [ ] {text}\n"
+        content = content.rstrip() + f"\n\n{section_header}\n\n{new_line}\n"
     _write_text_atomic(tasks_file, content)
 
 
@@ -486,13 +473,23 @@ def tasks():
 @app.route("/tasks/toggle", methods=["POST"])
 @require_login
 def tasks_toggle():
-    data   = request.get_json(silent=True) or {}
-    line   = data.get("line")
-    action = data.get("action")
-    if line is None or action not in ("complete", "reopen"):
+    data    = request.get_json(silent=True) or {}
+    task_id = data.get("line")   # accepts string ID or legacy int index
+    action  = data.get("action")
+    if task_id is None or action not in ("complete", "reopen"):
         return {"error": "bad request"}, 400
     with get_user_lock(g.user["id"]):
-        return {"ok": _toggle_task(int(line), action)}
+        tasks_file = _get_tasks_file()
+        tasks_list = read_tasks(tasks_file)
+        task = _find_task_by_id(tasks_list, str(task_id))
+        if task is None:
+            return {"ok": False}
+        if action == "complete":
+            task.complete_task()
+        else:
+            task.reopen_task()
+        write_tasks(tasks_list, tasks_file)
+        return {"ok": True}
 
 
 @app.route("/tasks/add", methods=["POST"])
@@ -523,10 +520,10 @@ def tasks_update():
     with get_user_lock(g.user["id"]):
         tasks_file = _get_tasks_file()
         tasks_list = read_tasks(tasks_file)
-        if not (0 <= task_id < len(tasks_list)):
+        task = _find_task_by_id(tasks_list, str(task_id))
+        if task is None:
             return {"error": "task not found"}, 404
 
-        task      = tasks_list[task_id]
         next_task = None
 
         # Optimistic concurrency check: if the client sent a hash, verify the task
@@ -599,20 +596,20 @@ def tasks_bulk_update():
         # Optimistic concurrency: verify all affected tasks haven't changed.
         if task_hashes:
             for task_id in task_ids:
+                task = _find_task_by_id(tasks_list, str(task_id))
                 expected = task_hashes.get(str(task_id))
-                if expected and 0 <= task_id < len(tasks_list):
-                    if tasks_list[task_id].content_hash != expected:
-                        return {"error": "conflict",
-                                "message": "One or more tasks changed — please refresh."}, 409
+                if task and expected and task.content_hash != expected:
+                    return {"error": "conflict",
+                            "message": "One or more tasks changed — please refresh."}, 409
 
         if action == "delete":
-            delete_ids = set(task_ids)
-            tasks_list = [t for t in tasks_list if t.line_num not in delete_ids]
+            delete_ids = set(str(tid) for tid in task_ids)
+            tasks_list = [t for t in tasks_list if t.id not in delete_ids]
         else:
             for task_id in task_ids:
-                if not (0 <= task_id < len(tasks_list)):
+                task = _find_task_by_id(tasks_list, str(task_id))
+                if task is None:
                     continue
-                task = tasks_list[task_id]
                 if action == "set-priority":
                     task.set_priority(value if value else None)
                 elif action == "set-context":
