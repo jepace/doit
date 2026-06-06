@@ -908,8 +908,12 @@ document.querySelectorAll('.bulk-item').forEach(item => {
 // ── Column sort with date grouping ──────────────────────────
 const PRIORITY_ORDER = {top:0, high:1, medium:2, low:3};
 
-let sortCol = localStorage.getItem('tasks-sort-col') || 'due';
-let sortDir = localStorage.getItem('tasks-sort-dir') || 'asc';
+{% if prefs.sort_col2 %}localStorage.setItem('tasks-sort-level-1-col', '{{ prefs.sort_col2 }}');
+localStorage.setItem('tasks-sort-level-1-dir', '{{ prefs.sort_dir2 }}');{% endif %}
+{% if prefs.sort_col3 %}localStorage.setItem('tasks-sort-level-2-col', '{{ prefs.sort_col3 }}');
+localStorage.setItem('tasks-sort-level-2-dir', '{{ prefs.sort_dir3 }}');{% endif %}
+let sortCol = localStorage.getItem('tasks-sort-col') || '{{ prefs.sort_col or "due" }}';
+let sortDir = localStorage.getItem('tasks-sort-dir') || '{{ prefs.sort_dir or "asc" }}';
 function getSortLevels() {
   const lvls = [];
   for (let i = 1; i <= 3; i++) {

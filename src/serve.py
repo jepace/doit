@@ -464,8 +464,10 @@ def tasks():
     tasks_list   = [t for t in all_tasks if t.section != "Archive"]
     archive_list = [t for t in all_tasks if t.section == "Archive"]
     tasks_list.sort(key=lambda t: t.due or "9999-12-31")
+    prefs = UserStore.get_prefs(g.user["id"])
     return render_template("tasks_view.html", tasks=tasks_list,
                            archive_tasks=archive_list,
+                           prefs=prefs,
                            all_contexts=get_all_contexts(tasks_file),
                            all_projects=get_all_projects(tasks_file))
 
@@ -644,8 +646,12 @@ def settings():
                 user["id"],
                 theme     = request.form.get("theme",    "system"),
                 font_size = request.form.get("font_size","medium"),
-                sort_col  = request.form.get("sort_col", "due"),
-                sort_dir  = request.form.get("sort_dir", "asc"),
+                sort_col  = request.form.get("sort_col",  "due"),
+                sort_dir  = request.form.get("sort_dir",  "asc"),
+                sort_col2 = request.form.get("sort_col2", ""),
+                sort_dir2 = request.form.get("sort_dir2", "asc"),
+                sort_col3 = request.form.get("sort_col3", ""),
+                sort_dir3 = request.form.get("sort_dir3", "asc"),
             )
             return redirect(url_for("settings", saved="1"))
 
