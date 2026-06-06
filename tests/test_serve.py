@@ -344,11 +344,13 @@ class TestRecurrenceAtomicWrite:
         assert r.get_json()["ok"] is True
 
         after = read_tasks(tasks_file)
-        # There should now be one more task (the next recurrence)
-        assert len(after) == len(tasks) + 1
-        new_task = after[-1]
-        assert new_task.recurrence == "1w"
-        assert not new_task.complete
+        # Completed task moves to Archive; next recurrence added as open task
+        # Total count stays the same (one archived, one new open)
+        open_recurring = [t for t in after if t.recurrence and not t.complete]
+        archived_recurring = [t for t in after if t.recurrence and t.complete and t.section == "Archive"]
+        assert len(open_recurring) == 1
+        assert open_recurring[0].recurrence == "1w"
+        assert len(archived_recurring) == 1
 
 
 # ---------------------------------------------------------------------------
