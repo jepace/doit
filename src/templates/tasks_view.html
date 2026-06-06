@@ -424,6 +424,14 @@
       <option value="">All contexts</option>
       {% for ctx in all_contexts %}<option value="{{ ctx }}">{{ ctx }}</option>{% endfor %}
     </select>
+    <select id="filter-due" data-filter="due" title="Filter by due date">
+      <option value="">Any date</option>
+      <option value="overdue">Overdue</option>
+      <option value="today">Due today</option>
+      <option value="overdue-today">Overdue + today</option>
+      <option value="week">Next 7 days</option>
+      <option value="none">No due date</option>
+    </select>
     <select id="filter-pri" data-filter="priority" title="Filter by priority">
       <option value="">All priorities</option>
       <option value="top">Top</option>
@@ -437,14 +445,6 @@
       <option value="blocked">Blocked</option>
       <option value="in-progress">In progress</option>
       <option value="someday">Someday</option>
-    </select>
-    <select id="filter-due" data-filter="due" title="Filter by due date">
-      <option value="">Any date</option>
-      <option value="overdue">Overdue</option>
-      <option value="today">Due today</option>
-      <option value="overdue-today">Overdue + today</option>
-      <option value="week">Next 7 days</option>
-      <option value="none">No due date</option>
     </select>
     <button class="filter-clear" id="filter-clear" onclick="clearFilters()">Clear ✕</button>
     <span class="filter-count" id="filter-count"></span>
