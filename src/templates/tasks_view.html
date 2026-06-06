@@ -35,9 +35,11 @@
   .toolbar { display: flex; justify-content: space-between; align-items: center;
              gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
 
-  /* Filter bar */
-  .filter-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* Filter bar — stretches across the toolbar on desktop so the
+     dropdowns spread out instead of bunching on the left. */
+  .filter-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1; }
   .filter-bar select {
+    flex: 1; min-width: 0;
     font-size: 12px; padding: 4px 6px; border: 1px solid var(--border);
     border-radius: 6px; background: var(--bg2); color: var(--text);
     -webkit-appearance: none; cursor: pointer; }
