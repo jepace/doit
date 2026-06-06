@@ -40,7 +40,7 @@ class TestAuth:
         csrf = get_csrf(client)
         r = client.post("/auth/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "_csrf_token": csrf})
         assert r.status_code == 302
-        assert "/tasks" in r.headers["Location"]
+        assert r.headers["Location"].endswith("/")
 
     def test_login_wrong_password(self, client):
         csrf = get_csrf(client)
@@ -57,17 +57,22 @@ class TestAuth:
             csrf = sess["csrf_token"]
         r = authed_client.post("/auth/logout", data={"_csrf_token": csrf})
         assert r.status_code == 302
-        r2 = authed_client.get("/tasks")
+        r2 = authed_client.get("/")
         assert "/auth/login" in r2.headers["Location"]
 
     def test_unauthenticated_tasks_redirects_to_login(self, client):
-        r = client.get("/tasks")
+        r = client.get("/")
         assert r.status_code == 302
         assert "/auth/login" in r.headers["Location"]
 
-    def test_index_redirects(self, authed_client):
+    def test_index_serves_tasks(self, authed_client):
         r = authed_client.get("/")
+        assert r.status_code == 200
+
+    def test_tasks_legacy_redirects_to_root(self, client):
+        r = client.get("/tasks")
         assert r.status_code == 302
+        assert r.headers["Location"].endswith("/")
 
     def test_register_page_get(self, client):
         r = client.get("/register")
@@ -85,11 +90,11 @@ class TestAuth:
 
 class TestTasksView:
     def test_tasks_page_renders(self, authed_client):
-        r = authed_client.get("/tasks")
+        r = authed_client.get("/")
         assert r.status_code == 200
 
     def test_tasks_page_shows_task_descriptions(self, authed_client):
-        r = authed_client.get("/tasks")
+        r = authed_client.get("/")
         assert b"Buy milk" in r.data
         assert b"Call dentist" in r.data
 
@@ -185,7 +190,7 @@ class TestAddTask:
             data=json.dumps({"text": "Unique task XYZ"}),
             content_type="application/json",
         )
-        r = authed_client.get("/tasks")
+        r = authed_client.get("/")
         assert b"Unique task XYZ" in r.data
 
 
@@ -441,17 +446,17 @@ class TestIpAndSafeNext:
         """L3: //evil.com must be rejected."""
         import serve
         with serve.app.test_request_context("/"):
-            assert serve._safe_next("//evil.com/steal") == "/tasks"
+            assert serve._safe_next("//evil.com/steal") == "/"
 
     def test_safe_next_rejects_backslash_protocol_relative(self):
         import serve
         with serve.app.test_request_context("/"):
-            assert serve._safe_next("/\\evil.com") == "/tasks"
+            assert serve._safe_next("/\\evil.com") == "/"
 
     def test_safe_next_rejects_absolute_url(self):
         import serve
         with serve.app.test_request_context("/"):
-            assert serve._safe_next("https://evil.com") == "/tasks"
+            assert serve._safe_next("https://evil.com") == "/"
 
     def test_safe_next_allows_relative_path(self):
         import serve

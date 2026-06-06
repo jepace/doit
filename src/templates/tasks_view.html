@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Tasks — DoIt{% endblock %}
+{% block title %}Do It!{% endblock %}
 {% block head %}
 <style>
   .tasks-container { padding: 16px 24px; width: 100%; }
@@ -33,7 +33,32 @@
 
   /* Toolbar */
   .toolbar { display: flex; justify-content: space-between; align-items: center;
-             margin-bottom: 10px; }
+             gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+
+  /* Filter bar */
+  .filter-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .filter-bar select {
+    font-size: 12px; padding: 4px 6px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg2); color: var(--text);
+    -webkit-appearance: none; cursor: pointer; }
+  .filter-bar select.active { border-color: var(--accent); color: var(--accent);
+    font-weight: 700; }
+  .filter-bar select:focus { border-color: var(--accent); outline: none; }
+  .filter-clear { font-size: 12px; color: var(--accent); cursor: pointer;
+    background: none; border: none; padding: 4px 6px; display: none; }
+  .filter-clear.show { display: inline; }
+  .filter-count { font-size: 11px; color: var(--text2); }
+
+  /* Filtered-out rows/cards (orthogonal to show-completed inline display) */
+  .task-row.filtered-out, .note-row.filtered-out,
+  .task-card.filtered-out, .card-note-row.filtered-out,
+  .group-header-row.filtered-out, .card-group-hdr.filtered-out { display: none !important; }
+
+  @media print {
+    .add-form, .toolbar .bulk-wrap, .show-completed, .filter-bar select,
+    .filter-clear, .col-sel, .col-note, .fab, nav, header { display: none !important; }
+    .filtered-out { display: none !important; }
+  }
   .show-completed { display: flex; gap: 6px; align-items: center; font-size: 12px;
                     cursor: pointer; color: var(--text); }
   .bulk-wrap { position: relative; }
@@ -333,7 +358,7 @@
 {% block body %}
 <div class="page">
 <div class="tasks-container">
-<h1>Tasks</h1>
+<h1>Do It!</h1>
 
 <!-- Add task form (desktop) -->
 <table class="add-form">
@@ -389,9 +414,39 @@
 
 <!-- Toolbar -->
 <div class="toolbar">
-  <label class="show-completed">
-    <input type="checkbox" id="show-done"> Show completed
-  </label>
+  <div class="filter-bar">
+    <label class="show-completed">
+      <input type="checkbox" id="show-done"> Show completed
+    </label>
+    <select id="filter-ctx" data-filter="context" title="Filter by context">
+      <option value="">All contexts</option>
+      {% for ctx in all_contexts %}<option value="{{ ctx }}">{{ ctx }}</option>{% endfor %}
+    </select>
+    <select id="filter-pri" data-filter="priority" title="Filter by priority">
+      <option value="">All priorities</option>
+      <option value="top">Top</option>
+      <option value="high">High</option>
+      <option value="medium">Medium</option>
+      <option value="low">Low</option>
+    </select>
+    <select id="filter-status" data-filter="status" title="Filter by status">
+      <option value="">All statuses</option>
+      <option value="waiting">Waiting</option>
+      <option value="blocked">Blocked</option>
+      <option value="in-progress">In progress</option>
+      <option value="someday">Someday</option>
+    </select>
+    <select id="filter-due" data-filter="due" title="Filter by due date">
+      <option value="">Any date</option>
+      <option value="overdue">Overdue</option>
+      <option value="today">Due today</option>
+      <option value="overdue-today">Overdue + today</option>
+      <option value="week">Next 7 days</option>
+      <option value="none">No due date</option>
+    </select>
+    <button class="filter-clear" id="filter-clear" onclick="clearFilters()">Clear ✕</button>
+    <span class="filter-count" id="filter-count"></span>
+  </div>
   <div class="bulk-wrap">
     <button class="bulk-btn" id="bulk-btn">⋯ Bulk</button>
     <div class="bulk-drop" id="bulk-drop">
@@ -425,7 +480,8 @@
   <tbody>
   {% for task in tasks %}
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}">
+      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
+      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}">
     <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}"
         {% if task.complete %}checked{% endif %}></td>
     <td>
@@ -473,7 +529,8 @@
   {% endfor %}
   {% for task in archive_tasks %}
   <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}" style="display:none">
+      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
+      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}" style="display:none">
     <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}" checked></td>
     <td class="col-task">
       <span class="ecell" data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
@@ -497,6 +554,7 @@
        data-id="{{ task.id }}"
        data-hash="{{ task.content_hash }}"
        data-due="{{ task.due or '' }}"
+       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
     <div class="card-cb-wrap">
       <input type="checkbox" class="card-cb"
@@ -532,6 +590,7 @@
 <div class="task-card completed pri-{{ task.priority or 'none' }}"
      data-id="{{ task.id }}"
      data-hash="{{ task.content_hash }}"
+     data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}"
      data-complete="true"
      style="display:none">
   <div style="display:flex;align-items:center;gap:8px">
@@ -623,6 +682,92 @@ showDoneCb.addEventListener('change', () => {
 });
 showDoneCb.checked = localStorage.getItem('tasks-show-done') === 'true';
 applyShowDone();
+
+// ── Global filters ───────────────────────────────────────────
+let filters = {};
+try { filters = JSON.parse(localStorage.getItem('tasks-filters') || '{}') || {}; } catch (e) { filters = {}; }
+
+function dueMatches(due, f) {
+  if (!f) return true;
+  const has = !!due;
+  if (f === 'none') return !has;
+  if (!has) return false;
+  if (f === 'overdue')       return due <  today;
+  if (f === 'today')         return due === today;
+  if (f === 'overdue-today') return due <= today;
+  if (f === 'week') {
+    const d7 = new Date(Date.now() + 7*86400000).toLocaleDateString('en-CA');
+    return due <= d7;
+  }
+  return true;
+}
+
+function rowMatchesFilters(el) {
+  if (filters.context  && (el.dataset.ctx    || '') !== filters.context)  return false;
+  if (filters.priority && (el.dataset.pri    || '') !== filters.priority) return false;
+  if (filters.status   && (el.dataset.status || '') !== filters.status)   return false;
+  if (filters.due      && !dueMatches(el.dataset.due || '', filters.due)) return false;
+  return true;
+}
+
+function anyFilterActive() {
+  return !!(filters.context || filters.priority || filters.status || filters.due);
+}
+
+function applyFilters() {
+  // Table rows + their note rows
+  document.querySelectorAll('.task-row').forEach(row => {
+    const out = !rowMatchesFilters(row);
+    row.classList.toggle('filtered-out', out);
+    const nr = document.querySelector(`.tasks-table .note-row[data-id="${row.dataset.id}"]`);
+    if (nr) nr.classList.toggle('filtered-out', out);
+  });
+  // Cards + their note rows
+  document.querySelectorAll('.task-card').forEach(card => {
+    const out = !rowMatchesFilters(card);
+    card.classList.toggle('filtered-out', out);
+    const nr = document.querySelector(`.card-note-row[data-id="${card.dataset.id}"]`);
+    if (nr) nr.classList.toggle('filtered-out', out);
+  });
+
+  // Reflect state in the dropdowns + clear button + count
+  document.querySelectorAll('.filter-bar select[data-filter]').forEach(sel => {
+    const key = sel.dataset.filter;
+    sel.value = filters[key] || '';
+    sel.classList.toggle('active', !!filters[key]);
+  });
+  document.getElementById('filter-clear').classList.toggle('show', anyFilterActive());
+
+  const countEl = document.getElementById('filter-count');
+  if (anyFilterActive()) {
+    const n = [...document.querySelectorAll('.task-row')].filter(
+      r => !r.classList.contains('filtered-out') &&
+           !(r.classList.contains('completed') && !showDoneCb.checked)).length;
+    countEl.textContent = `${n} shown`;
+  } else {
+    countEl.textContent = '';
+  }
+
+  // Rebuild group headers + zebra striping for the now-visible set
+  sortTable();
+  buildCardGroups();
+}
+
+function clearFilters() {
+  filters = {};
+  localStorage.removeItem('tasks-filters');
+  applyFilters();
+}
+
+document.querySelectorAll('.filter-bar select[data-filter]').forEach(sel => {
+  sel.addEventListener('change', () => {
+    const key = sel.dataset.filter;
+    if (sel.value) filters[key] = sel.value;
+    else delete filters[key];
+    localStorage.setItem('tasks-filters', JSON.stringify(filters));
+    applyFilters();
+  });
+});
 
 // ── Done checkbox (table) ────────────────────────────────────
 document.querySelectorAll('.primary-cb').forEach(cb => {
@@ -1019,7 +1164,7 @@ function sortTable() {
   if (sortCol === 'due' && sortDir === 'asc') {
     let lastKey = null;
     for (const {row} of pairs) {
-      if (row.classList.contains('completed')) continue;
+      if (row.classList.contains('completed') || row.classList.contains('filtered-out')) continue;
       const due = row.querySelector('.ecell[data-field="due"]')?.textContent.trim() || '—';
       const grp = dateGroup(due);
       if (grp.label !== lastKey) {
@@ -1032,6 +1177,7 @@ function sortTable() {
     const PRI_CLS    = {0:'grp-pri-top', 1:'grp-pri-high', 2:'grp-pri-medium', 3:'grp-pri-low', 4:'grp-pri-none'};
     let lastVal = null;
     for (const {row} of pairs) {
+      if (row.classList.contains('filtered-out')) continue;
       const val = colVal(row, 'priority');
       if (val !== lastVal) {
         tbody.insertBefore(makeGroupHeader(PRI_CLS[val] || 'grp-pri-none', PRI_LABELS[val] || 'No Priority'), row);
@@ -1041,6 +1187,7 @@ function sortTable() {
   } else if (sortCol === 'context') {
     let lastVal = null;
     for (const {row} of pairs) {
+      if (row.classList.contains('filtered-out')) continue;
       const val = colVal(row, 'context');
       if (val !== lastVal) {
         const label = val === '￿' ? 'No Context' : val.charAt(0).toUpperCase() + val.slice(1);
@@ -1069,7 +1216,8 @@ function sortTable() {
 function recolorRows() {
   let visibleIdx = 0;
   document.querySelectorAll('.task-row').forEach(row => {
-    const isHidden = row.classList.contains('completed') && !showDoneCb.checked;
+    const isHidden = row.classList.contains('filtered-out') ||
+                     (row.classList.contains('completed') && !showDoneCb.checked);
     row.classList.toggle('row-odd',  !isHidden && visibleIdx % 2 === 0);
     row.classList.toggle('row-even', !isHidden && visibleIdx % 2 !== 0);
     if (!isHidden) visibleIdx++;
@@ -1107,6 +1255,7 @@ function buildCardGroups() {
 
   cards.forEach(card => {
     if (card.dataset.complete === 'true') return;
+    if (card.classList.contains('filtered-out')) return;
     const due = card.dataset.due;
     const grp = dateGroup(due);
     groupCounts[grp.label] = (groupCounts[grp.label] || 0) + 1;
@@ -1128,6 +1277,7 @@ function buildCardGroups() {
 }
 
 buildCardGroups();
+applyFilters();
 
 // ── Add task (desktop) ────────────────────────────────────────
 async function addTask() {
