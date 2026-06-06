@@ -471,6 +471,22 @@
     </td>
   </tr>
   {% endfor %}
+  {% for task in archive_tasks %}
+  <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
+      data-id="{{ task.line_num }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}" style="display:none">
+    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.line_num }}" checked></td>
+    <td class="col-task">
+      <span class="ecell" data-id="{{ task.line_num }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
+    </td>
+    <td class="col-ctx"><span class="ecell{% if not task.context %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="context">{{ task.context or '—' }}</span></td>
+    <td class="col-due"><span class="ecell{% if not task.due %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="due">{{ task.due or '—' }}</span></td>
+    <td class="col-rep"><span class="ecell{% if not task.recurrence %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="recurrence">{{ task.recurrence or '—' }}</span></td>
+    <td class="col-pri"><span class="ecell{% if not task.priority %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span></td>
+    <td class="col-start"><span class="ecell{% if not task.start %} empty{% endif %}" data-id="{{ task.line_num }}" data-field="start">{{ task.start or '—' }}</span></td>
+    <td class="col-note"></td>
+    <td class="col-sel"><input type="checkbox" class="sel-cb" data-id="{{ task.line_num }}" style="display:block;margin:0 auto"></td>
+  </tr>
+  {% endfor %}
   </tbody>
 </table>
 
@@ -511,6 +527,18 @@
       <button onclick="closeNote({{ task.line_num }})">Cancel</button>
     </div>
   </div>
+{% endfor %}
+{% for task in archive_tasks %}
+<div class="task-card completed pri-{{ task.priority or 'none' }}"
+     data-id="{{ task.line_num }}"
+     data-hash="{{ task.content_hash }}"
+     data-complete="true"
+     style="display:none">
+  <div style="display:flex;align-items:center;gap:8px">
+    <input type="checkbox" class="card-cb" data-id="{{ task.line_num }}" checked>
+    <div class="card-task-name"><span data-id="{{ task.line_num }}" data-field="description">{{ task.description }}</span>{% if task.tags.get('#done') %} <span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}</div>
+  </div>
+</div>
 {% endfor %}
 </div>
 

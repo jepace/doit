@@ -472,10 +472,13 @@ def _add_task(text: str, section: str = "Inbox") -> None:
 @app.route("/tasks")
 @require_login
 def tasks():
-    tasks_file = _get_tasks_file()
-    tasks_list = read_tasks(tasks_file)
+    tasks_file   = _get_tasks_file()
+    all_tasks    = read_tasks(tasks_file)
+    tasks_list   = [t for t in all_tasks if t.section != "Archive"]
+    archive_list = [t for t in all_tasks if t.section == "Archive"]
     tasks_list.sort(key=lambda t: t.due or "9999-12-31")
     return render_template("tasks_view.html", tasks=tasks_list,
+                           archive_tasks=archive_list,
                            all_contexts=get_all_contexts(tasks_file),
                            all_projects=get_all_projects(tasks_file))
 
