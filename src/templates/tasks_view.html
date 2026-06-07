@@ -422,7 +422,7 @@
 <div class="toolbar">
   <div class="filter-bar">
     <label class="show-completed">
-      <input type="checkbox" id="show-done"> Show completed
+      <input type="checkbox" id="show-done" autocomplete="off"> Show completed
     </label>
     <select id="filter-ctx" data-filter="context" title="Filter by context">
       <option value="">All contexts</option>
@@ -481,7 +481,7 @@
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
       data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}">
-    <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}"
+    <td><input type="checkbox" class="done-cb primary-cb" autocomplete="off" data-id="{{ task.id }}"
         {% if task.complete %}checked{% endif %}></td>
     <td>
       <span class="ecell task-name-text{% if not task.description %} empty{% endif %}"
@@ -513,7 +513,7 @@
       <button class="note-btn" title="Delete" style="color:var(--danger); opacity:.6;"
               onclick="deleteTask('{{ task.id }}')">✕</button>
     </td>
-    <td><input type="checkbox" class="sel-cb" data-id="{{ task.id }}"></td>
+    <td><input type="checkbox" class="sel-cb" autocomplete="off" data-id="{{ task.id }}"></td>
   </tr>
   <tr class="note-row" data-id="{{ task.id }}">
     <td colspan="9">
@@ -530,7 +530,7 @@
   <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
       data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}" style="display:none">
-    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}" checked></td>
+    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" autocomplete="off" data-id="{{ task.id }}" checked></td>
     <td class="col-task">
       <span class="ecell" data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
     </td>
@@ -540,7 +540,7 @@
     <td class="col-pri"><span class="ecell{% if not task.priority %} empty{% endif %}" data-id="{{ task.id }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span></td>
     <td class="col-start"><span class="ecell{% if not task.start %} empty{% endif %}" data-id="{{ task.id }}" data-field="start">{{ task.start or '—' }}</span></td>
     <td class="col-note"></td>
-    <td class="col-sel"><input type="checkbox" class="sel-cb" data-id="{{ task.id }}" style="display:block;margin:0 auto"></td>
+    <td class="col-sel"><input type="checkbox" class="sel-cb" autocomplete="off" data-id="{{ task.id }}" style="display:block;margin:0 auto"></td>
   </tr>
   {% endfor %}
   </tbody>
@@ -556,7 +556,7 @@
        data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
     <div class="card-cb-wrap">
-      <input type="checkbox" class="card-cb"
+      <input type="checkbox" class="card-cb" autocomplete="off"
              data-id="{{ task.id }}"
              {% if task.complete %}checked{% endif %}>
     </div>
@@ -593,7 +593,7 @@
      data-complete="true"
      style="display:none">
   <div style="display:flex;align-items:center;gap:8px">
-    <input type="checkbox" class="card-cb" data-id="{{ task.id }}" checked>
+    <input type="checkbox" class="card-cb" autocomplete="off" data-id="{{ task.id }}" checked>
     <div class="card-task-name"><span data-id="{{ task.id }}" data-field="description">{{ task.description }}</span>{% if task.tags.get('#done') %} <span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}</div>
   </div>
 </div>
@@ -1155,7 +1155,7 @@ function sortTable() {
   function makeGroupHeader(cls, label) {
     const tr = document.createElement('tr');
     tr.className = `group-header-row ${cls}`;
-    tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:0"><input type="checkbox" class="grp-select-all"> ${label}</label></td>`;
+    tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:0"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label}</label></td>`;
     return tr;
   }
 
