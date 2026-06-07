@@ -796,6 +796,7 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
           if (cnr) cnr.style.display = 'none';
         }
         delete completionTimeouts[id];
+        buildCardGroups();  // refresh mobile group counts now this card is hidden
         if (data && data.next_task) setTimeout(() => location.reload(), 800);
       }, 2000);
     } else {
@@ -809,6 +810,7 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       row?.classList.remove('completed');
       card?.classList.remove('completed');
       await apiUpdate(id, 'complete', 'false');
+      buildCardGroups();  // refresh mobile group counts now this card is visible again
     }
   });
 });
@@ -1253,6 +1255,7 @@ function buildCardGroups() {
 
   cards.forEach(card => {
     if (card.dataset.complete === 'true') return;
+    if (card.classList.contains('completed') && !showDoneCb.checked) return;
     if (card.classList.contains('filtered-out')) return;
     const due = card.dataset.due;
     const grp = dateGroup(due);
