@@ -31,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
                           get_all_projects, get_tasks_file, DATA_DIR,
-                          _write_text_atomic)
+                          _write_text_atomic, sort_tasks)
 from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
@@ -523,8 +523,8 @@ def tasks():
     all_tasks    = read_tasks(tasks_file)
     tasks_list   = [t for t in all_tasks if t.section != "Archive"]
     archive_list = [t for t in all_tasks if t.section == "Archive"]
-    tasks_list.sort(key=lambda t: t.due or "9999-12-31")
-    prefs = UserStore.get_prefs(g.user["id"])
+    prefs      = UserStore.get_prefs(g.user["id"])
+    tasks_list = sort_tasks(tasks_list, prefs)
     return render_template("tasks_view.html", tasks=tasks_list,
                            archive_tasks=archive_list,
                            prefs=prefs,
@@ -543,53 +543,8 @@ def tasks_print():
                   if t.section != "Archive"
                   and not t.complete
                   and t.due and t.due <= today]
-
-    prefs = UserStore.get_prefs(g.user["id"])
-    PRI = {"top": 0, "high": 1, "medium": 2, "low": 3}
-
-    def sort_key(t, col, direction):
-        if col == "due":
-            v = t.due or "9999-12-31"
-        elif col == "priority":
-            v = PRI.get(t.priority or "", 4)
-        elif col == "context":
-            v = (t.context or "").lower()
-        elif col == "name":
-            v = t.description.lower()
-        else:
-            v = ""
-        return v
-
-    levels = [
-        (prefs.get("sort_col",  "due"), prefs.get("sort_dir",  "asc")),
-        (prefs.get("sort_col2", ""),    prefs.get("sort_dir2", "asc")),
-        (prefs.get("sort_col3", ""),    prefs.get("sort_dir3", "asc")),
-    ]
-    levels = [(col, d) for col, d in levels if col]
-
-    def multi_key(t):
-        return tuple(
-            sort_key(t, col, d) if d == "asc"
-            else _invert(sort_key(t, col, d))
-            for col, d in levels
-        )
-
-    # _invert: negate numbers, flip strings for descending sort
-    def _invert(v):
-        if isinstance(v, int):   return -v
-        if isinstance(v, float): return -v
-        # strings: negate char codes via a proxy object
-        return _Desc(v)
-
-    class _Desc:
-        def __init__(self, s): self.s = s
-        def __lt__(self, o): return self.s > o.s
-        def __gt__(self, o): return self.s < o.s
-        def __eq__(self, o): return self.s == o.s
-        def __le__(self, o): return self.s >= o.s
-        def __ge__(self, o): return self.s <= o.s
-
-    printable.sort(key=multi_key)
+    prefs     = UserStore.get_prefs(g.user["id"])
+    printable = sort_tasks(printable, prefs)
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks")
 
