@@ -543,8 +543,19 @@ def tasks_print():
                   if t.section != "Archive"
                   and not t.complete
                   and t.due and t.due <= today]
-    prefs     = UserStore.get_prefs(g.user["id"])
-    printable = sort_tasks(printable, prefs)
+    prefs = UserStore.get_prefs(g.user["id"])
+    # Query params carry the live localStorage sort state (set by the print link JS).
+    # Fall back to saved prefs if absent.
+    def qp(key, fallback): return request.args.get(key) or prefs.get(fallback, "")
+    sort_prefs = {
+        "sort_col":  qp("sc",  "sort_col")  or "due",
+        "sort_dir":  qp("sd",  "sort_dir")  or "asc",
+        "sort_col2": qp("sc2", "sort_col2"),
+        "sort_dir2": qp("sd2", "sort_dir2") or "asc",
+        "sort_col3": qp("sc3", "sort_col3"),
+        "sort_dir3": qp("sd3", "sort_dir3") or "asc",
+    }
+    printable = sort_tasks(printable, sort_prefs)
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks")
 
