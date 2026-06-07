@@ -543,7 +543,53 @@ def tasks_print():
                   if t.section != "Archive"
                   and not t.complete
                   and t.due and t.due <= today]
-    printable.sort(key=lambda t: (t.due, t.priority or "z"))
+
+    prefs = UserStore.get_prefs(g.user["id"])
+    PRI = {"top": 0, "high": 1, "medium": 2, "low": 3}
+
+    def sort_key(t, col, direction):
+        if col == "due":
+            v = t.due or "9999-12-31"
+        elif col == "priority":
+            v = PRI.get(t.priority or "", 4)
+        elif col == "context":
+            v = (t.context or "").lower()
+        elif col == "name":
+            v = t.description.lower()
+        else:
+            v = ""
+        return v
+
+    levels = [
+        (prefs.get("sort_col",  "due"), prefs.get("sort_dir",  "asc")),
+        (prefs.get("sort_col2", ""),    prefs.get("sort_dir2", "asc")),
+        (prefs.get("sort_col3", ""),    prefs.get("sort_dir3", "asc")),
+    ]
+    levels = [(col, d) for col, d in levels if col]
+
+    def multi_key(t):
+        return tuple(
+            sort_key(t, col, d) if d == "asc"
+            else _invert(sort_key(t, col, d))
+            for col, d in levels
+        )
+
+    # _invert: negate numbers, flip strings for descending sort
+    def _invert(v):
+        if isinstance(v, int):   return -v
+        if isinstance(v, float): return -v
+        # strings: negate char codes via a proxy object
+        return _Desc(v)
+
+    class _Desc:
+        def __init__(self, s): self.s = s
+        def __lt__(self, o): return self.s > o.s
+        def __gt__(self, o): return self.s < o.s
+        def __eq__(self, o): return self.s == o.s
+        def __le__(self, o): return self.s >= o.s
+        def __ge__(self, o): return self.s <= o.s
+
+    printable.sort(key=multi_key)
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks")
 
