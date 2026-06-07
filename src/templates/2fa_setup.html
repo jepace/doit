@@ -48,6 +48,7 @@
   {% if error %}<div class="error">{{ error }}</div>{% endif %}
 
   <form method="post" autocomplete="off">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="secret" value="{{ secret }}">
     <div class="field">
       <label>Verification code</label>
