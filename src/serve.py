@@ -532,6 +532,22 @@ def tasks():
                            all_projects=get_all_projects(tasks_file))
 
 
+@app.route("/tasks/print")
+@require_login
+def tasks_print():
+    from datetime import date
+    tasks_file = _get_tasks_file()
+    all_tasks  = read_tasks(tasks_file)
+    today      = date.today().isoformat()
+    printable  = [t for t in all_tasks
+                  if t.section != "Archive"
+                  and not t.complete
+                  and t.due and t.due <= today]
+    printable.sort(key=lambda t: (t.due, t.priority or "z"))
+    return render_template("print.html", tasks=printable,
+                           today=today, active="tasks")
+
+
 @app.route("/tasks/toggle", methods=["POST"])
 @require_login
 def tasks_toggle():

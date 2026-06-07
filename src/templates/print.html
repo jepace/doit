@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Do It! — {{ today }}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+      color: #000;
+      background: #fff;
+      padding: 28px 32px;
+    }
+
+    /* Screen-only controls */
+    .screen-only {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #ddd;
+    }
+    .screen-only h2 { font-size: 16px; color: #333; }
+    .btn-print {
+      background: #007aff; color: #fff; border: none;
+      padding: 9px 20px; border-radius: 8px; font-size: 14px;
+      font-weight: 600; cursor: pointer;
+    }
+    .btn-back {
+      color: #007aff; text-decoration: none; font-size: 14px;
+    }
+
+    /* Header */
+    .print-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 20px;
+    }
+    .print-header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .print-header .date {
+      font-size: 13px;
+      color: #555;
+    }
+
+    /* Task list */
+    .task-list { width: 100%; }
+
+    .task-row {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      align-items: start;
+      gap: 10px;
+      padding: 10px 0 0;
+      border-top: 1px solid #e0e0e0;
+    }
+    .task-row:last-child { border-bottom: 1px solid #e0e0e0; }
+
+    .check-box {
+      width: 18px; height: 18px;
+      border: 1.5px solid #333;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .task-body { min-width: 0; }
+
+    .task-name {
+      font-size: 13px;
+      font-weight: 500;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .task-name.overdue { color: #c00; }
+
+    .due-tag {
+      display: inline-block;
+      font-size: 10px;
+      color: #888;
+      margin-top: 2px;
+    }
+
+    /* Writing lines */
+    .note-lines {
+      margin-top: 6px;
+      margin-bottom: 10px;
+    }
+    .note-line {
+      border-bottom: 1px solid #d8d8d8;
+      height: 20px;
+      width: 100%;
+    }
+
+    .task-ctx {
+      font-size: 11px;
+      color: #555;
+      white-space: nowrap;
+      padding-top: 2px;
+      text-align: right;
+    }
+
+    .empty {
+      text-align: center;
+      color: #888;
+      padding: 40px 0;
+      font-size: 14px;
+    }
+
+    @media print {
+      .screen-only { display: none !important; }
+      body { padding: 16px 20px; }
+      @page { margin: 1.5cm; size: letter portrait; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="screen-only">
+    <a href="/" class="btn-back">‹ Back</a>
+    <h2>Print preview — {{ today }}</h2>
+    <button class="btn-print" onclick="window.print()">Save as PDF / Print</button>
+  </div>
+
+  <div class="print-header">
+    <h1>Do It!</h1>
+    <span class="date">{{ today }}</span>
+  </div>
+
+  {% if tasks %}
+  <div class="task-list">
+    {% for task in tasks %}
+    <div class="task-row">
+      <div class="check-box"></div>
+      <div class="task-body">
+        <div class="task-name {% if task.due < today %}overdue{% endif %}">
+          {{ task.description }}
+        </div>
+        {% if task.due < today %}
+        <span class="due-tag">due {{ task.due }}</span>
+        {% endif %}
+        <div class="note-lines">
+          <div class="note-line"></div>
+          <div class="note-line"></div>
+        </div>
+      </div>
+      <div class="task-ctx">{{ task.context or '' }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty">Nothing due today or overdue — you're clear!</div>
+  {% endif %}
+
+</body>
+</html>
