@@ -148,6 +148,38 @@
     </div>
   </form>
 
+  <!-- ── Two-Factor Auth ──────────────────────────── -->
+  <div class="section" style="margin-top:24px;">
+    <h2>Two-Factor Authentication</h2>
+    {% if request.args.get('2fa') == 'enabled' %}
+      <div class="success-banner" style="margin-bottom:14px;">✓ 2FA enabled.</div>
+    {% elif request.args.get('2fa') == 'disabled' %}
+      <div class="success-banner" style="margin-bottom:14px;">2FA has been disabled.</div>
+    {% endif %}
+    {% if current_user.totp_secret %}
+      <p style="font-size:14px;color:var(--text2);margin-bottom:14px;">
+        2FA is <strong style="color:var(--success);">enabled</strong>.
+        Your account requires a code from your authenticator app on sign-in.
+      </p>
+      <form method="post" action="/auth/2fa/disable">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="btn-save"
+                style="background:var(--danger);"
+                onclick="return confirm('Disable two-factor authentication?')">
+          Disable 2FA
+        </button>
+      </form>
+    {% else %}
+      <p style="font-size:14px;color:var(--text2);margin-bottom:14px;">
+        2FA is <strong style="color:var(--text2);">off</strong>.
+        Add an extra layer of security with Google Authenticator or any TOTP app.
+      </p>
+      <a href="/auth/2fa/setup" class="btn-save" style="display:inline-block;text-decoration:none;">
+        Set Up 2FA
+      </a>
+    {% endif %}
+  </div>
+
   <!-- ── Password ──────────────────────────────────── -->
   <form method="post" style="margin-top:24px;">
     <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">

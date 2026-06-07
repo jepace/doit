@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Two-Factor Auth — Do It!{% endblock %}
+
+{% block head %}
+<style>
+  .auth-wrap { max-width: 360px; margin: 60px auto; padding: 0 20px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+  .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 28px; }
+  .field { margin-bottom: 18px; }
+  .field label { display: block; font-size: 13px; font-weight: 600;
+                 color: var(--text2); margin-bottom: 6px; }
+  .code-input { text-align: center; font-size: 28px; font-weight: 600;
+                letter-spacing: 8px; }
+  .error { background: #ff3b3018; border: 1px solid #ff3b3040; color: var(--danger);
+           border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px; }
+  .btn-primary { width: 100%; padding: 13px; background: var(--accent); color: #fff;
+                 border: none; border-radius: 10px; font-size: 16px; font-weight: 600;
+                 cursor: pointer; }
+  .back { display: block; text-align: center; margin-top: 18px; font-size: 14px;
+          color: var(--accent); text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+<div class="auth-wrap">
+  <h1>Two-Factor Auth</h1>
+  <p class="subtitle">Enter the 6-digit code from your authenticator app.</p>
+
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+  <form method="post" autocomplete="off">
+    <div class="field">
+      <label>Code</label>
+      <input type="text" class="code-input" name="code"
+             inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"
+             autocomplete="one-time-code" autofocus placeholder="000000">
+    </div>
+    <button type="submit" class="btn-primary">Verify</button>
+  </form>
+  <a href="/auth/login" class="back">← Back to sign in</a>
+</div>
+</div>
+{% endblock %}

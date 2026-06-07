@@ -514,6 +514,41 @@ class UserStore:
             p["admin"] = not p.get("admin", False)
             _write_json(_profile_path(user_id), p)
 
+    @classmethod
+    def generate_totp_secret(cls) -> str:
+        """Return a fresh base32 TOTP secret (not yet saved)."""
+        import pyotp
+        return pyotp.random_base32()
+
+    @classmethod
+    def enable_totp(cls, user_id: str, secret: str) -> None:
+        """Persist a verified TOTP secret, enabling 2FA for this user."""
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return
+            p["totp_secret"] = secret
+            _write_json(_profile_path(user_id), p)
+
+    @classmethod
+    def disable_totp(cls, user_id: str) -> None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return
+            p.pop("totp_secret", None)
+            _write_json(_profile_path(user_id), p)
+
+    @classmethod
+    def verify_totp(cls, user_id: str, code: str) -> bool:
+        """Return True if the given TOTP code is valid for this user."""
+        import pyotp
+        p = _read_json(_profile_path(user_id))
+        secret = p.get("totp_secret") if p else None
+        if not secret:
+            return False
+        return pyotp.TOTP(secret).verify(code.replace(" ", ""), valid_window=1)
+
     # ── Helpers ───────────────────────────────────────────────────────────
 
     @classmethod
