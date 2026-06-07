@@ -10,8 +10,15 @@
       font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       font-size: 13px;
       color: #000;
+      background: #f0f0f0;
+    }
+    .page-body {
       background: #fff;
-      padding: 28px 32px;
+      max-width: 8.5in;
+      min-height: 11in;
+      margin: 24px auto;
+      padding: 2cm 2.2cm;
+      box-shadow: 0 2px 12px rgba(0,0,0,.15);
     }
 
     .screen-only {
@@ -30,13 +37,17 @@
     .btn-back { color: #007aff; text-decoration: none; font-size: 14px; }
 
     .print-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
       margin-bottom: 16px;
     }
-    .print-header h1 { font-size: 18px; font-weight: 700; }
-    .print-header .date { font-size: 12px; color: #555; }
+    .print-header h1 {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .print-header h1 .date {
+      font-weight: 400;
+      font-size: 18px;
+      color: #000;
+    }
 
     /* One row per task: [checkbox] [name……underline……] [ctx] */
     .task-row {
@@ -87,8 +98,9 @@
 
     @media print {
       .screen-only { display: none !important; }
-      body { padding: 0; }
-      @page { margin: 1.5cm; size: letter portrait; }
+      body { background: #fff; }
+      .page-body { margin: 0; padding: 0; box-shadow: none; min-height: 0; }
+      @page { margin: 2cm 2.2cm; size: 8.5in 11in portrait; }
     }
   </style>
 </head>
@@ -100,9 +112,9 @@
     <button class="btn-print" onclick="window.print()">Save as PDF / Print</button>
   </div>
 
+  <div class="page-body">
   <div class="print-header">
-    <h1>Do It!</h1>
-    <span class="date">{{ today }}</span>
+    <h1>Do It! <span class="date">({{ today }})</span></h1>
   </div>
 
   {% if tasks %}
@@ -117,6 +129,7 @@
   {% else %}
   <div class="empty">Nothing due today or overdue.</div>
   {% endif %}
+  </div><!-- /.page-body -->
 
 </body>
 </html>
