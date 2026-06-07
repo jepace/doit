@@ -127,6 +127,20 @@
       {% endfor %}
     </div>
 
+    <!-- ── Daily digest ───────────────────────── -->
+    <div class="section" style="margin-top:16px;">
+      <h2>Daily Email Digest</h2>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:12px;">
+        Send a daily email listing today's and overdue tasks.
+        Requires a cron job — see below.
+      </p>
+      <label style="display:flex;align-items:center;gap:10px;font-size:14px;cursor:pointer;">
+        <input type="checkbox" name="daily_digest" value="1"
+               {% if current_user.prefs.daily_digest %}checked{% endif %}>
+        Enable daily digest email
+      </label>
+    </div>
+
     <button type="submit" class="btn-save">Save Preferences</button>
   </form>
 

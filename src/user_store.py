@@ -136,14 +136,15 @@ def _token_hash(plain: str) -> str:
 
 def _default_prefs() -> dict:
     return {
-        "theme":     "system",
-        "font_size": "medium",
-        "sort_col":  "due",
-        "sort_dir":  "asc",
-        "sort_col2": "",
-        "sort_dir2": "asc",
-        "sort_col3": "",
-        "sort_dir3": "asc",
+        "theme":        "system",
+        "font_size":    "medium",
+        "sort_col":     "due",
+        "sort_dir":     "asc",
+        "sort_col2":    "",
+        "sort_dir2":    "asc",
+        "sort_col3":    "",
+        "sort_dir3":    "asc",
+        "daily_digest": False,
     }
 
 
@@ -425,17 +426,19 @@ class UserStore:
     def save_prefs(cls, user_id: str, theme: str, font_size: str,
                    sort_col: str, sort_dir: str,
                    sort_col2: str = "", sort_dir2: str = "asc",
-                   sort_col3: str = "", sort_dir3: str = "asc") -> None:
+                   sort_col3: str = "", sort_dir3: str = "asc",
+                   daily_digest: bool = False) -> None:
         def _valid_col(v): return v if v in _VALID_SORT_COLS else ""
         prefs = {
-            "theme":     theme     if theme     in _VALID_THEMES    else "system",
-            "font_size": font_size if font_size in _VALID_FONTSIZES else "medium",
-            "sort_col":  sort_col  if sort_col  in _VALID_SORT_COLS else "due",
-            "sort_dir":  sort_dir  if sort_dir  in _VALID_SORT_DIRS else "asc",
-            "sort_col2": _valid_col(sort_col2),
-            "sort_dir2": sort_dir2 if sort_dir2 in _VALID_SORT_DIRS else "asc",
-            "sort_col3": _valid_col(sort_col3),
-            "sort_dir3": sort_dir3 if sort_dir3 in _VALID_SORT_DIRS else "asc",
+            "theme":        theme     if theme     in _VALID_THEMES    else "system",
+            "font_size":    font_size if font_size in _VALID_FONTSIZES else "medium",
+            "sort_col":     sort_col  if sort_col  in _VALID_SORT_COLS else "due",
+            "sort_dir":     sort_dir  if sort_dir  in _VALID_SORT_DIRS else "asc",
+            "sort_col2":    _valid_col(sort_col2),
+            "sort_dir2":    sort_dir2 if sort_dir2 in _VALID_SORT_DIRS else "asc",
+            "sort_col3":    _valid_col(sort_col3),
+            "sort_dir3":    sort_dir3 if sort_dir3 in _VALID_SORT_DIRS else "asc",
+            "daily_digest": bool(daily_digest),
         }
         with _get_lock(user_id):
             _write_json(_prefs_path(user_id), prefs)
