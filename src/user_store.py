@@ -174,6 +174,8 @@ class UserStore:
             if email in index:
                 raise ValueError("An account with that email already exists.")
 
+            is_first_user = len(index) == 0
+
             user_id = str(uuid.uuid4())
             user_dir = _user_dir(user_id)
             user_dir.mkdir(parents=True, exist_ok=True)
@@ -182,7 +184,7 @@ class UserStore:
                 "id":                   user_id,
                 "email":                email,
                 "password_hash":        generate_password_hash(password),
-                "admin":                False,
+                "admin":                is_first_user,
                 "suspended":            False,
                 "verified":             False,
                 "created_at":           _utcnow().isoformat(),
