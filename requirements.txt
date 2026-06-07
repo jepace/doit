@@ -1,3 +1,4 @@
 flask>=3.1,<4
 werkzeug>=3.1,<4
 pyotp>=2.9,<3
+qrcode[pil]>=7.4,<8

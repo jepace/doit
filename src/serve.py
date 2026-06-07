@@ -404,7 +404,15 @@ def auth_2fa_setup():
         error = "Code didn't match — please try again."
     issuer = "DoIt"
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["email"], issuer_name=issuer)
-    return render_template("2fa_setup.html", secret=secret, uri=uri, error=error)
+    import qrcode, base64, io
+    qr = qrcode.QRCode(box_size=6, border=2)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    qr_data_uri = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return render_template("2fa_setup.html", secret=secret, uri=uri, qr_data_uri=qr_data_uri, error=error)
 
 
 @app.route("/auth/2fa/disable", methods=["POST"])
