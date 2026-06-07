@@ -291,8 +291,9 @@
     .card-due.overdue { color: var(--danger); font-weight: 600; }
     .card-due.due-today { color: #ff9500; font-weight: 600; }
     .card-ctx {
-      font-size: 11px; color: var(--text2);
-      background: var(--bg3); border-radius: 4px; padding: 1px 6px;
+      font-size: 11px; color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      border-radius: 4px; padding: 1px 6px;
       cursor: pointer;
     }
     .card-ctx:active { background: var(--accent); color: #fff; }
