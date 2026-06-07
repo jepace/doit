@@ -404,16 +404,11 @@ def auth_2fa_setup():
         error = "Code didn't match — please try again."
     issuer = "DoIt"
     uri = pyotp.TOTP(secret).provisioning_uri(name=user["email"], issuer_name=issuer)
-    import qrcode, qrcode.image.svg, io
-    qr = qrcode.QRCode(box_size=10, border=2)
-    qr.add_data(uri)
-    qr.make(fit=True)
-    img = qr.make_image(image_factory=qrcode.image.svg.SvgPathImage)
+    import segno, io
     buf = io.BytesIO()
-    img.save(buf)
+    segno.make(uri, error='m').save(buf, kind='svg', xmldecl=False, nl=False,
+                                    border=2, scale=4)
     qr_svg = buf.getvalue().decode()
-    # Strip XML declaration so it embeds cleanly inline
-    qr_svg = qr_svg[qr_svg.index('<svg'):]
     return render_template("2fa_setup.html", secret=secret, uri=uri, qr_svg=qr_svg, error=error)
 
 
