@@ -149,6 +149,7 @@
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
 
   /* Date group header rows (injected by JS when sorting by due) */
+  .grp-count { font-size: 11px; font-weight: 500; opacity: .65; }
   .group-header-row td {
     background: var(--bg3) !important;
     color: var(--text2);
@@ -1202,7 +1203,7 @@ function sortTable() {
   function makeGroupHeader(cls, label) {
     const tr = document.createElement('tr');
     tr.className = `group-header-row ${cls}`;
-    tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:0"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label}</label></td>`;
+    tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
     return tr;
   }
 
@@ -1256,6 +1257,20 @@ function sortTable() {
   });
 
   recolorRows();
+  updateGroupCounts();
+}
+
+function updateGroupCounts() {
+  document.querySelectorAll('.group-header-row').forEach(hdr => {
+    let count = 0, el = hdr.nextElementSibling;
+    while (el && !el.classList.contains('group-header-row')) {
+      if (el.classList.contains('task-row') && !el.classList.contains('filtered-out') && el.style.display !== 'none')
+        count++;
+      el = el.nextElementSibling;
+    }
+    const span = hdr.querySelector('.grp-count');
+    if (span) span.textContent = count ? `(${count})` : '';
+  });
 }
 
 function recolorRows() {
