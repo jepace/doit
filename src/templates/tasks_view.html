@@ -3,7 +3,7 @@
 {% block head %}
 <style>
   .tasks-container { padding: 16px 24px; width: 100%; }
-  h1 { font-size: 18px; font-weight: 700; margin-bottom: 12px; }
+  h1 { font-size: 18px; font-weight: 700; margin-bottom: 12px; padding-right: 44px; }
 
   .col-done  { width: 50px; }
   .col-task  { width: 26%; }
@@ -58,7 +58,7 @@
 
   @media print {
     .add-form, .toolbar .bulk-wrap, .show-completed, .filter-bar select,
-    .filter-clear, .col-sel, .col-note, .fab, nav, header { display: none !important; }
+    .filter-clear, .col-sel, .col-note, .fab, .top-menu { display: none !important; }
     .filtered-out { display: none !important; }
   }
   .show-completed { display: flex; gap: 6px; align-items: center; font-size: 12px;
@@ -221,7 +221,7 @@
   @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 900px) {
-    .tasks-container { padding: 10px 0 90px; }
+    .tasks-container { padding: 10px 0 24px; }
     h1 { padding: 0 14px; }
 
     /* Hide desktop elements */
@@ -321,7 +321,7 @@
     /* FAB */
     .fab {
       display: flex; align-items: center; justify-content: center;
-      position: fixed; bottom: 72px; right: 20px;
+      position: fixed; bottom: calc(var(--safe-bottom) + 20px); right: 20px;
       width: 56px; height: 56px; border-radius: 50%;
       background: var(--accent); color: #fff;
       font-size: 28px; font-weight: 300; line-height: 1;
