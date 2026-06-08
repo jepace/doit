@@ -121,6 +121,19 @@
   .ecell:hover { background: var(--accent); color: #fff !important; border-radius: 3px; }
 
   /* Inline edit input — created dynamically, replaces span */
+  .date-picker-wrap { position: relative; display: inline-block; }
+  .date-quick-bar {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 400;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,.15); padding: 4px;
+    display: flex; flex-direction: column; gap: 2px; min-width: 110px;
+  }
+  .date-quick-btn {
+    background: none; border: none; text-align: left; padding: 6px 10px;
+    font-size: 13px; color: var(--text); cursor: pointer; border-radius: 5px;
+    font-family: inherit; white-space: nowrap;
+  }
+  .date-quick-btn:hover { background: var(--bg3); }
   .edit-inline { width: 100%; padding: 2px 4px; font-size: 12px; border: 1px solid var(--accent);
                  border-radius: 4px; background: var(--bg); color: var(--text);
                  box-sizing: border-box; outline: none; -webkit-appearance: none; }
@@ -910,10 +923,50 @@ function makeEditable(span) {
       inp.appendChild(o);
     });
   } else if (field === 'due' || field === 'start') {
+    // Wrap date input + quick-pick buttons in a small popover
+    const wrap = document.createElement('div');
+    wrap.className = 'date-picker-wrap';
     inp = document.createElement('input');
     inp.type = 'date';
     inp.className = 'edit-inline';
     inp.value = curVal || today;
+
+    const quickBar = document.createElement('div');
+    quickBar.className = 'date-quick-bar';
+    const addDays = (n) => {
+      const d = new Date(); d.setDate(d.getDate() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    const addMonths = (n) => {
+      const d = new Date(); d.setMonth(d.getMonth() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    [['Today', addDays(0)], ['Tomorrow', addDays(1)],
+     ['Next week', addDays(7)], ['Next month', addMonths(1)]].forEach(([label, val]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'date-quick-btn';
+      btn.textContent = label;
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        inp.value = val;
+        inp.dispatchEvent(new Event('change'));
+      });
+      quickBar.appendChild(btn);
+    });
+
+    wrap.appendChild(inp);
+    wrap.appendChild(quickBar);
+    td.replaceChild(wrap, span);
+    inp.focus();
+    try { inp.showPicker(); } catch(e) {}
+
+    // commit/cancel need to work on wrap, not inp directly
+    // Handled below via inp reference — wrap removed when span swapped back
+    const _origReplaceChild = td.replaceChild.bind(td);
+    inp._wrap = wrap;
+    inp._td   = td;
+    inp._span = span;
   } else {
     inp = document.createElement('input');
     inp.type = 'text';
@@ -922,11 +975,14 @@ function makeEditable(span) {
     if (field === 'recurrence') inp.setAttribute('list', 'rep-options');
   }
 
-  td.replaceChild(inp, span);
-  inp.focus();
-  if (inp.type === 'text') { inp.select(); }
-  else if (inp.type === 'date') { try { inp.showPicker(); } catch(e) {} }
+  // Date fields were already inserted above (inside a wrap); others insert now
+  if (!inp._wrap) {
+    td.replaceChild(inp, span);
+    inp.focus();
+    if (inp.type === 'text') { inp.select(); }
+  }
 
+  const _inpContainer = () => inp._wrap || inp;
   const commit = () => {
     let val = (inp.tagName === 'SELECT' ? inp.value : inp.value.trim());
     if (field === 'recurrence' && val) val = REPEAT_MAP[val.toLowerCase()] || val;
@@ -934,7 +990,7 @@ function makeEditable(span) {
     if (field === 'priority' && val) displayVal = val.charAt(0).toUpperCase() + val.slice(1);
     span.textContent = displayVal || '—';
     span.classList.toggle('empty', !val);
-    td.replaceChild(span, inp);
+    td.replaceChild(span, _inpContainer());
     // Update due date styling on card
     if (field === 'due' && span.classList.contains('card-due')) {
       applyDueStyling(span, val);
@@ -942,7 +998,7 @@ function makeEditable(span) {
     apiUpdate(id, field, val);
   };
 
-  const cancel = () => td.replaceChild(span, inp);
+  const cancel = () => td.replaceChild(span, _inpContainer());
 
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
@@ -954,7 +1010,9 @@ function makeEditable(span) {
   } else if (field === 'due' || field === 'start') {
     let picked = false;
     inp.addEventListener('change', () => { picked = true; commit(); });
-    inp.addEventListener('blur',   () => { if (!picked) cancel(); });
+    inp.addEventListener('blur',   () => { if (!picked) setTimeout(() => {
+      if (!inp._wrap?.contains(document.activeElement)) cancel();
+    }, 150); });
   } else {
     let escaped = false;
     inp.addEventListener('keydown', e => { if (e.key === 'Escape') escaped = true; });
@@ -1339,6 +1397,29 @@ function buildCardGroups() {
 
 buildCardGroups();
 applyFilters();
+
+// Quick-pick date buttons for the add-task form's due date field
+(function() {
+  const addDays = n => { const d = new Date(); d.setDate(d.getDate()+n); return d.toISOString().slice(0,10); };
+  const addMonths = n => { const d = new Date(); d.setMonth(d.getMonth()+n); return d.toISOString().slice(0,10); };
+  const picks = [['Today', addDays(0)], ['Tomorrow', addDays(1)],
+                 ['Next week', addDays(7)], ['Next month', addMonths(1)]];
+  ['f-due', 'f-start', 'mf-due'].forEach(id => {
+    const inp = document.getElementById(id);
+    if (!inp) return;
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;';
+    picks.forEach(([label, val]) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = label;
+      btn.style.cssText = 'font-size:10px;padding:2px 6px;border-radius:4px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;font-family:inherit;';
+      btn.addEventListener('click', () => { inp.value = val; });
+      bar.appendChild(btn);
+    });
+    inp.parentElement.appendChild(bar);
+  });
+})();
 
 // Keep the print link in sync with the current localStorage sort state
 (function() {
