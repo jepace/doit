@@ -567,7 +567,7 @@ def tasks_update():
                 extra.extend(next_task.raw_notes.split("\n"))
         write_tasks(tasks_list, tasks_file, extra_lines=extra if extra else None)
 
-    result = {"ok": True}
+    result = {"ok": True, "new_hash": task.content_hash}
     if next_task:
         result["next_task"] = {
             "description": next_task.description,
