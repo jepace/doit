@@ -154,10 +154,11 @@
                          border: 1px solid var(--border); border-radius: 5px;
                          background: var(--bg3); color: var(--text); cursor: pointer; }
   .note-actions button:first-child { background: var(--success); color: #fff; border: none; }
-  .note-btn { display: block; margin: 0 auto; background: none; border: none;
+  .note-btn, .delete-btn { display: block; margin: 0 auto; background: none; border: none;
               cursor: pointer; font-size: 14px; opacity: .45; color: var(--text);
               padding: 0; line-height: 1; }
   .note-btn:hover, .note-btn.has-note { opacity: 1; }
+  .delete-btn:hover { opacity: 1; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
 
@@ -559,7 +560,7 @@
     <td style="display:flex; gap:4px; justify-content:center; align-items:center;">
       <button class="note-btn{% if task.notes %} has-note{% endif %}"
               data-id="{{ task.id }}">{% if task.notes %}📝{% else %}+{% endif %}</button>
-      <button class="note-btn" title="Delete" style="color:var(--danger); opacity:.6;"
+      <button class="delete-btn" title="Delete" style="color:var(--danger); opacity:.6;"
               onclick="deleteTask('{{ task.id }}')">✕</button>
     </td>
     <td><input type="checkbox" class="sel-cb" autocomplete="off" data-id="{{ task.id }}"></td>
