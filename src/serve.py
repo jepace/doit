@@ -175,7 +175,7 @@ def _ip() -> str:
 
 
 def _safe_next(url: str) -> str:
-    """Return url only if it's a safe relative path, otherwise /tasks."""
+    """Return url only if it's a safe relative path, otherwise the home page."""
     from urllib.parse import urlparse
     if not url or url.startswith("//") or url.startswith("/\\"):
         return url_for("tasks")
@@ -252,11 +252,6 @@ def internal_error(exc):
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
-
-@app.route("/")
-def index():
-    return redirect(url_for("tasks"))
-
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
@@ -457,6 +452,12 @@ def _add_task(text: str, section: str = "Inbox") -> None:
 # ---------------------------------------------------------------------------
 
 @app.route("/tasks")
+def tasks_legacy():
+    # Old bookmarks/links — redirect to the canonical root URL.
+    return redirect(url_for("tasks"))
+
+
+@app.route("/")
 @require_login
 def tasks():
     tasks_file   = _get_tasks_file()
