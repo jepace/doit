@@ -10,7 +10,7 @@
   .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
   .qr-wrap { display: flex; justify-content: center; margin: 20px 0;
              background: #fff; border-radius: 12px; padding: 16px; }
-  .qr-wrap canvas { display: block; }
+  .qr-wrap img { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
   .secret-box { background: var(--bg2); border: 1px solid var(--border);
                 border-radius: 8px; padding: 12px 14px; font-family: monospace;
                 font-size: 15px; letter-spacing: 2px; text-align: center;
@@ -37,7 +37,7 @@
   <p class="subtitle">Scan the QR code with Google Authenticator, Authy, or any TOTP app.</p>
 
   <div class="qr-wrap">
-    <canvas id="qr"></canvas>
+    <img src="{{ qr_data_uri }}" alt="QR code for two-factor authentication">
   </div>
 
   <p class="step"><strong>Can't scan?</strong> Enter this key manually:</p>
@@ -59,21 +59,4 @@
   </form>
 </div>
 </div>
-
-<script>
-/* tiny QR encoder — qrcodejs, loaded from CDN, no tracking */
-(function() {
-  const s = document.createElement('script');
-  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
-  s.onload = function() {
-    new QRCode(document.getElementById('qr'), {
-      text: {{ uri | tojson }},
-      width: 200, height: 200,
-      colorDark: '#000000', colorLight: '#ffffff',
-      correctLevel: QRCode.CorrectLevel.M
-    });
-  };
-  document.head.appendChild(s);
-})();
-</script>
 {% endblock %}
