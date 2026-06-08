@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Set Up 2FA — Do It!{% endblock %}
+
+{% block head %}
+<style>
+  .setup-wrap { max-width: 480px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; padding-right: 44px; }
+  .back-link { display: inline-flex; align-items: center; gap: 5px; font-size: 14px;
+               color: var(--accent); text-decoration: none; margin-bottom: 10px; }
+  .subtitle { color: var(--text2); font-size: 14px; margin-bottom: 24px; }
+  .qr-wrap { display: flex; justify-content: center; margin: 20px 0;
+             background: #fff; border-radius: 12px; padding: 16px; }
+  .qr-wrap canvas { display: block; }
+  .secret-box { background: var(--bg2); border: 1px solid var(--border);
+                border-radius: 8px; padding: 12px 14px; font-family: monospace;
+                font-size: 15px; letter-spacing: 2px; text-align: center;
+                word-break: break-all; margin-bottom: 20px; color: var(--text); }
+  .step { font-size: 14px; color: var(--text2); margin-bottom: 20px; }
+  .step strong { color: var(--text); }
+  .field label { display: block; font-size: 13px; font-weight: 600;
+                 color: var(--text2); margin-bottom: 6px; }
+  .code-input { text-align: center; font-size: 24px; font-weight: 600;
+                letter-spacing: 6px; }
+  .error { background: #ff3b3018; border: 1px solid #ff3b3040; color: var(--danger);
+           border-radius: 8px; padding: 10px 14px; font-size: 14px; margin-bottom: 16px; }
+  .btn-primary { width: 100%; padding: 13px; background: var(--accent); color: #fff;
+                 border: none; border-radius: 10px; font-size: 16px; font-weight: 600;
+                 cursor: pointer; margin-top: 8px; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="page">
+<div class="setup-wrap">
+  <a href="/settings" class="back-link">‹ Settings</a>
+  <h1>Set Up 2FA</h1>
+  <p class="subtitle">Scan the QR code with Google Authenticator, Authy, or any TOTP app.</p>
+
+  <div class="qr-wrap">
+    <canvas id="qr"></canvas>
+  </div>
+
+  <p class="step"><strong>Can't scan?</strong> Enter this key manually:</p>
+  <div class="secret-box">{{ secret }}</div>
+
+  <p class="step">Once scanned, enter the 6-digit code below to confirm it's working.</p>
+
+  {% if error %}<div class="error">{{ error }}</div>{% endif %}
+
+  <form method="post" autocomplete="off">
+    <input type="hidden" name="secret" value="{{ secret }}">
+    <div class="field">
+      <label>Verification code</label>
+      <input type="text" class="code-input" name="code"
+             inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7"
+             autocomplete="one-time-code" autofocus placeholder="000000">
+    </div>
+    <button type="submit" class="btn-primary">Enable 2FA</button>
+  </form>
+</div>
+</div>
+
+<script>
+/* tiny QR encoder — qrcodejs, loaded from CDN, no tracking */
+(function() {
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js';
+  s.onload = function() {
+    new QRCode(document.getElementById('qr'), {
+      text: {{ uri | tojson }},
+      width: 200, height: 200,
+      colorDark: '#000000', colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  };
+  document.head.appendChild(s);
+})();
+</script>
+{% endblock %}

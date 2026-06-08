@@ -345,11 +345,16 @@ def auth_login():
             user, err = UserStore.authenticate(email, password)
             if user:
                 log.info("login: success for %s from %s", email, ip)
+                next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
+                if user.get("totp_secret"):
+                    session.clear()
+                    session["pending_2fa_user_id"] = user["id"]
+                    session["pending_2fa_next"] = next_url
+                    return redirect(url_for("auth_2fa"))
                 session.clear()
                 session.permanent = True
                 session["user_id"] = user["id"]
                 session["csrf_token"] = secrets.token_hex(32)
-                next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
                 return redirect(next_url)
             elif err == "Please verify your email address before signing in.":
                 # Don't auto-resend here — that would allow email-bombing unverified
@@ -361,6 +366,55 @@ def auth_login():
             error = err
     return render_template("login.html", error=error,
                            next=request.args.get("next", ""))
+
+
+@app.route("/auth/2fa", methods=["GET", "POST"])
+def auth_2fa():
+    user_id = session.get("pending_2fa_user_id")
+    if not user_id:
+        return redirect(url_for("auth_login"))
+    error = None
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        if UserStore.verify_totp(user_id, code):
+            next_url = session.get("pending_2fa_next") or url_for("tasks")
+            session.clear()
+            session.permanent = True
+            session["user_id"] = user_id
+            session["csrf_token"] = secrets.token_hex(32)
+            return redirect(next_url)
+        error = "Invalid code — try again."
+    return render_template("2fa.html", error=error)
+
+
+@app.route("/auth/2fa/setup", methods=["GET", "POST"])
+@require_login
+def auth_2fa_setup():
+    import pyotp
+    user = g.user
+    error = None
+    secret = request.form.get("secret") or request.args.get("secret") or UserStore.generate_totp_secret()
+    if request.method == "POST":
+        code = request.form.get("code", "").strip()
+        totp = pyotp.TOTP(secret)
+        if totp.verify(code.replace(" ", ""), valid_window=1):
+            UserStore.enable_totp(user["id"], secret)
+            log.info("2fa: enabled for %s", user["email"])
+            return redirect(url_for("settings") + "?2fa=enabled")
+        error = "Code didn't match — please try again."
+    issuer = "DoIt"
+    uri = pyotp.TOTP(secret).provisioning_uri(name=user["email"], issuer_name=issuer)
+    return render_template("2fa_setup.html", secret=secret, uri=uri, error=error)
+
+
+@app.route("/auth/2fa/disable", methods=["POST"])
+@require_login
+def auth_2fa_disable():
+    if not validate_csrf():
+        return "CSRF check failed", 403
+    UserStore.disable_totp(g.user["id"])
+    log.info("2fa: disabled for %s", g.user["email"])
+    return redirect(url_for("settings") + "?2fa=disabled")
 
 
 @app.route("/auth/logout", methods=["POST"])

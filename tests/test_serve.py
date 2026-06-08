@@ -85,6 +85,81 @@ class TestAuth:
 
 
 # ---------------------------------------------------------------------------
+# Two-factor auth
+# ---------------------------------------------------------------------------
+
+class TestTwoFactorAuth:
+    def test_2fa_setup_page_renders(self, authed_client):
+        r = authed_client.get("/auth/2fa/setup")
+        assert r.status_code == 200
+        assert b"QR" in r.data or b"2FA" in r.data
+
+    def test_2fa_enable_then_login_requires_code(self, client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        secret = pyotp.random_base32()
+        us.UserStore.enable_totp(user["id"], secret)
+        try:
+            csrf = get_csrf(client)
+            r = client.post("/auth/login",
+                            data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                                  "_csrf_token": csrf})
+            assert r.status_code == 302
+            assert "/auth/2fa" in r.headers["Location"]
+        finally:
+            us.UserStore.disable_totp(user["id"])
+
+    def test_2fa_valid_code_completes_login(self, client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        secret = pyotp.random_base32()
+        us.UserStore.enable_totp(user["id"], secret)
+        try:
+            csrf = get_csrf(client)
+            client.post("/auth/login",
+                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                              "_csrf_token": csrf})
+            code = pyotp.TOTP(secret).now()
+            r = client.post("/auth/2fa", data={"code": code})
+            assert r.status_code == 302
+            assert r.headers["Location"].endswith("/")
+        finally:
+            us.UserStore.disable_totp(user["id"])
+
+    def test_2fa_invalid_code_rejected(self, client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        secret = pyotp.random_base32()
+        us.UserStore.enable_totp(user["id"], secret)
+        try:
+            csrf = get_csrf(client)
+            client.post("/auth/login",
+                        data={"email": TEST_EMAIL, "password": TEST_PASSWORD,
+                              "_csrf_token": csrf})
+            r = client.post("/auth/2fa", data={"code": "000000"})
+            assert r.status_code == 200
+            assert b"Invalid" in r.data
+        finally:
+            us.UserStore.disable_totp(user["id"])
+
+    def test_2fa_page_without_pending_redirects(self, client):
+        r = client.get("/auth/2fa")
+        assert r.status_code == 302
+        assert "/auth/login" in r.headers["Location"]
+
+    def test_2fa_disable(self, authed_client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        us.UserStore.enable_totp(user["id"], pyotp.random_base32())
+        with authed_client.session_transaction() as sess:
+            csrf = sess["csrf_token"]
+        r = authed_client.post("/auth/2fa/disable", data={"_csrf_token": csrf})
+        assert r.status_code == 302
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        assert not user.get("totp_secret")
+
+
+# ---------------------------------------------------------------------------
 # Tasks view
 # ---------------------------------------------------------------------------
 
