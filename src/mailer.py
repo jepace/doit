@@ -46,6 +46,7 @@ def send_email(
             headers={
                 "Authorization": f"Bearer {resend_key}",
                 "Content-Type": "application/json",
+                "User-Agent": "doit/1.0",
             },
             method="POST",
         )
