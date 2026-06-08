@@ -26,6 +26,7 @@ def send_email(
 
     try:
         import urllib.request
+        import urllib.error
         import json as _json
 
         from_addr = cfg_get("email", "from_address", "noreply@example.com")
@@ -50,6 +51,14 @@ def send_email(
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
             return resp.status in (200, 201)
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", errors="replace")
+        except Exception:
+            pass
+        logger.error("Resend API error: %s — %s", exc, body)
+        return False
     except Exception as exc:
         logger.error("Resend API error: %s", exc)
         return False
