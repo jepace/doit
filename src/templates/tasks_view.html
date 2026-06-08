@@ -969,8 +969,10 @@ document.querySelectorAll('.ecell').forEach(span => {
 
 // ── Notes ────────────────────────────────────────────────────
 document.querySelectorAll('.note-btn, .card-note-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
     const id = btn.dataset.id;
+    if (!id) return;
     // Toggle table note row
     const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
     if (tnr) {
