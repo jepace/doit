@@ -419,3 +419,43 @@ def get_all_projects(tasks_file: Path):
 
 def get_all_sections(tasks_file: Path):
     return sorted(set(t.section for t in read_tasks(tasks_file) if t.section))
+
+
+_PRI_ORDER = {"top": 0, "high": 1, "medium": 2, "low": 3}
+
+class _Desc:
+    """Proxy to reverse string comparison for descending sorts."""
+    __slots__ = ("s",)
+    def __init__(self, s): self.s = s
+    def __lt__(self, o): return self.s > o.s
+    def __gt__(self, o): return self.s < o.s
+    def __eq__(self, o): return self.s == o.s
+    def __le__(self, o): return self.s >= o.s
+    def __ge__(self, o): return self.s <= o.s
+
+def _col_value(task, col):
+    if col == "due":      return task.due or "9999-12-31"
+    if col == "priority": return _PRI_ORDER.get(task.priority or "", 4)
+    if col == "context":  return (task.context or "").lower()
+    if col == "name":     return task.description.lower()
+    return ""
+
+def sort_tasks(tasks: list, prefs: dict) -> list:
+    """Return a new list sorted by the user's saved sort prefs (up to 3 levels)."""
+    levels = [
+        (prefs.get("sort_col",  "due"), prefs.get("sort_dir",  "asc")),
+        (prefs.get("sort_col2", ""),    prefs.get("sort_dir2", "asc")),
+        (prefs.get("sort_col3", ""),    prefs.get("sort_dir3", "asc")),
+    ]
+    levels = [(col, d) for col, d in levels if col]
+
+    def key(t):
+        parts = []
+        for col, d in levels:
+            v = _col_value(t, col)
+            if d != "asc":
+                v = -v if isinstance(v, int) else _Desc(v)
+            parts.append(v)
+        return tuple(parts)
+
+    return sorted(tasks, key=key)
