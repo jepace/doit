@@ -4,6 +4,9 @@
 {% block head %}
 <style>
   .settings-wrap { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  .back-link { display: inline-flex; align-items: center; gap: 5px; font-size: 14px;
+               color: var(--accent); text-decoration: none; margin-bottom: 10px; }
+  .back-link:hover { opacity: .8; }
   h1 { font-size: 22px; font-weight: 700; margin-bottom: 24px; padding-right: 44px; }
 
   .section { background: var(--bg2); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
@@ -49,6 +52,7 @@
 {% block body %}
 <div class="page">
 <div class="settings-wrap">
+  <a href="/" class="back-link">‹ Do It!</a>
   <h1>Settings</h1>
 
   {% if success %}

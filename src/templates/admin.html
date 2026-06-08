@@ -24,12 +24,16 @@
   .btn-accent { background:var(--accent);color:#fff; }
   .card { background:var(--bg2);border-radius:14px;overflow:hidden; }
   .empty { color:var(--text2);padding:20px;text-align:center;font-size:14px; }
+  .back-link { display:inline-flex;align-items:center;gap:5px;font-size:14px;
+               color:var(--accent);text-decoration:none;margin-bottom:10px; }
+  .back-link:hover { opacity:.8; }
 </style>
 {% endblock %}
 
 {% block body %}
 <div class="page">
   <div class="admin-wrap">
+    <a href="/" class="back-link">‹ Do It!</a>
     <h1>Users</h1>
     {% if users %}
     <div class="card">
