@@ -246,7 +246,8 @@ def read_tasks(tasks_file: Path):
 def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
     """Write updated tasks back to the given tasks file.
 
-    extra_lines: optional list of raw lines to append after all existing tasks
+    Completed tasks are moved to an ## Archive section at the end of the file.
+    extra_lines: optional list of raw lines to insert before the Archive section
     (used to add a new recurrence task in the same atomic write).
     """
     if not tasks_file.exists():
@@ -254,40 +255,130 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
 
     lines = tasks_file.read_text(encoding='utf-8').split('\n')
     task_map = {t.line_num: t for t in tasks}
-    new_lines = []
+
+    # Separate lines into pre-archive body and existing archive section
+    archive_start = None
+    for idx, line in enumerate(lines):
+        if re.match(r'^## Archive\s*$', line, re.IGNORECASE):
+            archive_start = idx
+            break
+
+    body_lines = lines[:archive_start] if archive_start is not None else lines
+
+    # Rewrite the main body; collect newly-completed tasks for the archive
+    new_body = []
+    newly_archived = []  # list of (task, notes_str) to move to archive
     i = 0
     task_count = 0
 
-    while i < len(lines):
-        line = lines[i]
+    while i < len(body_lines):
+        line = body_lines[i]
 
         if re.match(r'^\s*- \[[x ]\]', line):
             if task_count in task_map:
                 task = task_map[task_count]
-                new_lines.append(task.to_line())
-                if task.raw_notes.strip():
-                    for note_line in task.raw_notes.split('\n'):
-                        # Ensure notes are indented so read_tasks picks them up
-                        if note_line.strip() and note_line[:1] not in (' ', '\t'):
-                            note_line = '  ' + note_line
-                        new_lines.append(note_line)
+                if task.complete:
+                    # Move to archive instead of writing in place
+                    newly_archived.append(task)
+                else:
+                    new_body.append(task.to_line())
+                    if task.raw_notes.strip():
+                        for note_line in task.raw_notes.split('\n'):
+                            if note_line.strip() and note_line[:1] not in (' ', '\t'):
+                                note_line = '  ' + note_line
+                            new_body.append(note_line)
             task_count += 1
             i += 1
             # Skip old inline notes
-            while i < len(lines):
-                nxt = lines[i]
+            while i < len(body_lines):
+                nxt = body_lines[i]
                 if re.match(r'^##', nxt) or re.match(r'^\s*- \[[x ]\]', nxt):
                     break
                 i += 1
             continue
 
-        new_lines.append(line)
+        new_body.append(line)
         i += 1
 
+    # Append extra_lines (new recurrence task) into body before archive
     if extra_lines:
-        new_lines.extend(extra_lines)
+        new_body.extend(extra_lines)
 
-    _write_text_atomic(tasks_file, '\n'.join(new_lines))
+    # Process existing archive section through task_map so that reopened tasks
+    # move back to the body and updated tasks get their new content written.
+    existing_archive_entries = []
+    reopened_from_archive = []
+    if archive_start is not None:
+        archive_lines = lines[archive_start + 1:]
+        j = 0
+        while j < len(archive_lines):
+            aline = archive_lines[j]
+            if re.match(r'^\s*- \[[x ]\]', aline):
+                if task_count in task_map:
+                    task = task_map[task_count]
+                    if task.complete:
+                        # Still done — keep in archive with updated content
+                        entry = [task.to_line()]
+                        if task.raw_notes.strip():
+                            for note_line in task.raw_notes.split('\n'):
+                                if note_line.strip() and note_line[:1] not in (' ', '\t'):
+                                    note_line = '  ' + note_line
+                                entry.append(note_line)
+                        existing_archive_entries.extend(entry)
+                    else:
+                        # Reopened — move back to body
+                        body_entry = [task.to_line()]
+                        if task.raw_notes.strip():
+                            for note_line in task.raw_notes.split('\n'):
+                                if note_line.strip() and note_line[:1] not in (' ', '\t'):
+                                    note_line = '  ' + note_line
+                                body_entry.append(note_line)
+                        reopened_from_archive.extend(body_entry)
+                task_count += 1
+                j += 1
+                # Skip old inline notes in archive
+                while j < len(archive_lines):
+                    nxt = archive_lines[j]
+                    if re.match(r'^##', nxt) or re.match(r'^\s*- \[[x ]\]', nxt):
+                        break
+                    j += 1
+                continue
+            existing_archive_entries.append(aline)
+            j += 1
+
+    # Reopened tasks go back into the body (before archive)
+    if reopened_from_archive:
+        new_body.extend(reopened_from_archive)
+
+    # Render newly completed tasks
+    new_archive_entries = []
+    for task in newly_archived:
+        new_archive_entries.append(task.to_line())
+        if task.raw_notes.strip():
+            for note_line in task.raw_notes.split('\n'):
+                if note_line.strip() and note_line[:1] not in (' ', '\t'):
+                    note_line = '  ' + note_line
+                new_archive_entries.append(note_line)
+
+    # Assemble final file
+    # Strip trailing blank lines from body so we control spacing
+    while new_body and not new_body[-1].strip():
+        new_body.pop()
+
+    final_lines = new_body
+
+    has_archive = new_archive_entries or existing_archive_entries
+    if has_archive:
+        final_lines.append('')
+        final_lines.append('## Archive')
+        final_lines.append('')
+        # New completions go at the top of the archive (most recent first)
+        final_lines.extend(new_archive_entries)
+        final_lines.extend(existing_archive_entries)
+    else:
+        final_lines.append('')  # ensure trailing newline
+
+    _write_text_atomic(tasks_file, '\n'.join(final_lines))
 
 
 def get_all_contexts(tasks_file: Path):

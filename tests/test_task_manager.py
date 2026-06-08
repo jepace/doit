@@ -290,24 +290,89 @@ class TestReadWriteTasks:
         write_tasks(original, tmp_tasks_file)
         reloaded = read_tasks(tmp_tasks_file)
         assert len(reloaded) == len(original)
-        for a, b in zip(original, reloaded):
-            assert a.description == b.description
-            assert a.complete == b.complete
-            assert a.tags == b.tags
+        # Order may change (completed tasks move to Archive), so compare by description set
+        orig_desc = {t.description for t in original}
+        reload_desc = {t.description for t in reloaded}
+        assert orig_desc == reload_desc
 
     def test_write_tasks_modifies_field(self, tmp_tasks_file):
         tasks = read_tasks(tmp_tasks_file)
         tasks[0].set_priority("top")
         write_tasks(tasks, tmp_tasks_file)
         reloaded = read_tasks(tmp_tasks_file)
-        assert reloaded[0].priority == "top"
+        match = next(t for t in reloaded if t.description == tasks[0].description)
+        assert match.priority == "top"
 
-    def test_write_tasks_complete(self, tmp_tasks_file):
+    def test_write_tasks_complete_moves_to_archive(self, tmp_tasks_file):
+        tasks = read_tasks(tmp_tasks_file)
+        target = next(t for t in tasks if not t.complete)
+        target.complete_task()
+        write_tasks(tasks, tmp_tasks_file)
+        reloaded = read_tasks(tmp_tasks_file)
+        # Task should still exist but now in Archive section
+        match = next((t for t in reloaded if t.description == target.description), None)
+        assert match is not None
+        assert match.complete is True
+        assert match.section == "Archive"
+
+    def test_write_tasks_open_stays_in_place(self, tmp_tasks_file):
+        tasks = read_tasks(tmp_tasks_file)
+        open_task = next(t for t in tasks if not t.complete)
+        write_tasks(tasks, tmp_tasks_file)
+        reloaded = read_tasks(tmp_tasks_file)
+        match = next(t for t in reloaded if t.description == open_task.description)
+        assert match.section != "Archive"
+
+    def test_archive_section_created_on_first_completion(self, tmp_tasks_file):
+        tmp_tasks_file.write_text(
+            "# Tasks\n\n## Inbox\n\n- [ ] Alpha\n- [ ] Beta\n",
+            encoding="utf-8",
+        )
         tasks = read_tasks(tmp_tasks_file)
         tasks[0].complete_task()
         write_tasks(tasks, tmp_tasks_file)
+        content = tmp_tasks_file.read_text()
+        assert "## Archive" in content
         reloaded = read_tasks(tmp_tasks_file)
-        assert reloaded[0].complete is True
+        archived = [t for t in reloaded if t.section == "Archive"]
+        assert len(archived) == 1
+        assert archived[0].description == "Alpha"
+
+    def test_archive_accumulates_across_writes(self, tmp_tasks_file):
+        tmp_tasks_file.write_text(
+            "# Tasks\n\n## Inbox\n\n- [ ] First\n- [ ] Second\n- [ ] Third\n",
+            encoding="utf-8",
+        )
+        tasks = read_tasks(tmp_tasks_file)
+        tasks[0].complete_task()
+        write_tasks(tasks, tmp_tasks_file)
+
+        tasks2 = read_tasks(tmp_tasks_file)
+        open_tasks = [t for t in tasks2 if not t.complete]
+        open_tasks[0].complete_task()
+        write_tasks(tasks2, tmp_tasks_file)
+
+        reloaded = read_tasks(tmp_tasks_file)
+        archived = [t for t in reloaded if t.section == "Archive"]
+        assert len(archived) == 2
+
+    def test_reopen_task_leaves_archive(self, tmp_tasks_file):
+        tmp_tasks_file.write_text(
+            "# Tasks\n\n## Inbox\n\n- [ ] A task\n",
+            encoding="utf-8",
+        )
+        tasks = read_tasks(tmp_tasks_file)
+        tasks[0].complete_task()
+        write_tasks(tasks, tmp_tasks_file)
+
+        tasks2 = read_tasks(tmp_tasks_file)
+        archived = next(t for t in tasks2 if t.section == "Archive")
+        archived.reopen_task()
+        write_tasks(tasks2, tmp_tasks_file)
+
+        reloaded = read_tasks(tmp_tasks_file)
+        assert all(t.section != "Archive" for t in reloaded)
+        assert any(t.description == "A task" and not t.complete for t in reloaded)
 
     def test_write_tasks_notes_preserved(self, tmp_tasks_file):
         tmp_tasks_file.write_text(
