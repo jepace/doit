@@ -439,13 +439,6 @@
       <option value="medium">Medium</option>
       <option value="low">Low</option>
     </select>
-    <select id="filter-status" data-filter="status" title="Filter by status">
-      <option value="">All statuses</option>
-      <option value="waiting">Waiting</option>
-      <option value="blocked">Blocked</option>
-      <option value="in-progress">In progress</option>
-      <option value="someday">Someday</option>
-    </select>
     <button class="filter-clear" id="filter-clear" onclick="clearFilters()">Clear ✕</button>
     <span class="filter-count" id="filter-count"></span>
   </div>
@@ -483,7 +476,7 @@
   {% for task in tasks %}
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
       data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
-      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}">
+      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}">
     <td><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}"
         {% if task.complete %}checked{% endif %}></td>
     <td>
@@ -532,7 +525,7 @@
   {% for task in archive_tasks %}
   <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
       data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
-      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}" style="display:none">
+      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}" style="display:none">
     <td class="col-done"><input type="checkbox" class="done-cb primary-cb" data-id="{{ task.id }}" checked></td>
     <td class="col-task">
       <span class="ecell" data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
@@ -556,7 +549,7 @@
        data-id="{{ task.id }}"
        data-hash="{{ task.content_hash }}"
        data-due="{{ task.due or '' }}"
-       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}"
+       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
     <div class="card-cb-wrap">
       <input type="checkbox" class="card-cb"
@@ -592,7 +585,7 @@
 <div class="task-card completed pri-{{ task.priority or 'none' }}"
      data-id="{{ task.id }}"
      data-hash="{{ task.content_hash }}"
-     data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-status="{{ task.status or '' }}" data-due="{{ task.due or '' }}"
+     data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}"
      data-complete="true"
      style="display:none">
   <div style="display:flex;align-items:center;gap:8px">
@@ -707,13 +700,12 @@ function dueMatches(due, f) {
 function rowMatchesFilters(el) {
   if (filters.context  && (el.dataset.ctx    || '') !== filters.context)  return false;
   if (filters.priority && (el.dataset.pri    || '') !== filters.priority) return false;
-  if (filters.status   && (el.dataset.status || '') !== filters.status)   return false;
   if (filters.due      && !dueMatches(el.dataset.due || '', filters.due)) return false;
   return true;
 }
 
 function anyFilterActive() {
-  return !!(filters.context || filters.priority || filters.status || filters.due);
+  return !!(filters.context || filters.priority || filters.due);
 }
 
 function applyFilters() {
