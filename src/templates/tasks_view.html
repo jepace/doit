@@ -204,6 +204,19 @@
   .fab { display: none; }
   .mob-add-overlay { display: none; }
   .mob-add-sheet { display: none; }
+  #ptr-indicator {
+    display: none; justify-content: center; align-items: center; gap: 8px;
+    height: 0; overflow: hidden; transition: height 0.15s ease;
+    font-size: 13px; color: var(--text2);
+  }
+  #ptr-indicator.ptr-pulling { display: flex; }
+  #ptr-indicator.ptr-ready   { display: flex; color: var(--accent); }
+  .ptr-spinner {
+    width: 18px; height: 18px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: ptr-spin 0.6s linear infinite; flex-shrink: 0;
+  }
+  @keyframes ptr-spin { to { transform: rotate(360deg); } }
 
   @media (max-width: 900px) {
     .tasks-container { padding: 10px 0 90px; }
@@ -545,6 +558,12 @@
   {% endfor %}
   </tbody>
 </table>
+
+<!-- Pull-to-refresh indicator (mobile only) -->
+<div id="ptr-indicator">
+  <div class="ptr-spinner"></div>
+  <span id="ptr-label">Pull to refresh</span>
+</div>
 
 <!-- Mobile card list -->
 <div class="task-cards-list" id="card-list">
@@ -1389,6 +1408,51 @@ async function apiUpdate(id, field, value) {
   if (json.new_hash && el) el.dataset.hash = json.new_hash;
   return json;
 }
+
+// ── Pull-to-refresh (mobile) ──────────────────────────────────
+(function() {
+  const THRESHOLD = 72;  // px of pull needed to trigger refresh
+  const ptr = document.getElementById('ptr-indicator');
+  const ptrLabel = document.getElementById('ptr-label');
+  const page = document.querySelector('.page');
+  if (!ptr || !page) return;
+
+  let startY = 0, pulling = false, pullDist = 0;
+
+  page.addEventListener('touchstart', (e) => {
+    if (page.scrollTop === 0) {
+      startY = e.touches[0].clientY;
+      pulling = true;
+    }
+  }, { passive: true });
+
+  page.addEventListener('touchmove', (e) => {
+    if (!pulling) return;
+    pullDist = e.touches[0].clientY - startY;
+    if (pullDist <= 0) { pulling = false; return; }
+    const h = Math.min(pullDist * 0.45, THRESHOLD * 0.8);
+    ptr.style.height = h + 'px';
+    ptr.className = pullDist >= THRESHOLD ? 'ptr-ready' : 'ptr-pulling';
+    ptrLabel.textContent = pullDist >= THRESHOLD ? 'Release to refresh' : 'Pull to refresh';
+  }, { passive: true });
+
+  function endPull() {
+    if (!pulling) return;
+    pulling = false;
+    if (pullDist >= THRESHOLD) {
+      ptr.style.height = '44px';
+      ptrLabel.textContent = 'Refreshing…';
+      setTimeout(() => location.reload(), 150);
+    } else {
+      ptr.className = '';
+      ptr.style.height = '0';
+    }
+    pullDist = 0;
+  }
+
+  page.addEventListener('touchend', endPull, { passive: true });
+  page.addEventListener('touchcancel', endPull, { passive: true });
+})();
 
 // ── Keyboard shortcuts ────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
