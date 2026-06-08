@@ -154,6 +154,20 @@ class Task:
 
         rep = self.recurrence.lower()
 
+        # Weekday recurrence: e.g. "fri" or "mon,wed,fri".
+        # Always relative to the completion date — advance to the next
+        # occurrence of the nearest listed weekday (strictly after today).
+        WEEKDAYS = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3,
+                    'fri': 4, 'sat': 5, 'sun': 6}
+        parts = [p.strip() for p in rep.split(',') if p.strip()]
+        if parts and all(p in WEEKDAYS for p in parts):
+            today = datetime.now().date()
+            targets = {WEEKDAYS[p] for p in parts}
+            # days ahead to the next matching weekday (1..7, never 0/today)
+            ahead = min((wd - today.weekday()) % 7 or 7 for wd in targets)
+            next_due = today + timedelta(days=ahead)
+            return self._build_next_occurrence(next_due)
+
         # Parse recurrence: e.g. "1d", "1w+", "2m", etc.
         match = re.match(r'^(\d+)([dwmy])(\+?)$', rep)
         if not match:
@@ -198,7 +212,10 @@ class Task:
         else:
             return None
 
-        # Create new task for next occurrence
+        return self._build_next_occurrence(next_due)
+
+    def _build_next_occurrence(self, next_due):
+        """Create a fresh, incomplete copy of this task due on next_due."""
         next_task = Task("", -1)
         next_task.indent = self.indent
         next_task.complete = False

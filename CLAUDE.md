@@ -40,7 +40,7 @@ python3 src/tasks.py --file data/<uuid>/tasks.md  # CLI filter by path
   - [ ] Subtask (indented checkbox preserved as note content)
 ```
 
-Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:context`, `#proj:project`, `#rep:1d/1w/2w/1m/1y`, `#start:YYYY-MM-DD`, `#s:waiting/blocked/in-progress/someday`, `#star`, `#done:YYYY-MM-DD`
+Tags: `#p:top/high/medium/low`, `#due:YYYY-MM-DD`, `#ctx:context`, `#proj:project`, `#rep:1d/1w/2w/1m/1y` (or a weekday: `#rep:fri`, `#rep:mon,wed,fri` — advances to the next listed weekday after completion), `#start:YYYY-MM-DD`, `#s:waiting/blocked/in-progress/someday`, `#star`, `#done:YYYY-MM-DD`
 
 `#s` is a workflow status for tasks that aren't simply open/done — use it for GTD-style states like `waiting` (blocked on someone else), `blocked`, `in-progress`, or `someday` (maybe/later).
 

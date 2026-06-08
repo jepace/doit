@@ -401,7 +401,7 @@
   </td>
   <td class="col-rep">
     <label>Repeat</label>
-    <input id="f-rep" type="text" placeholder="1d, 1w, 2w, 1m, 3m, 1y" list="rep-options">
+    <input id="f-rep" type="text" placeholder="1d, 1w, 1m, fri…" list="rep-options">
     <datalist id="rep-options">
       <option value="1d">Daily</option>
       <option value="1w">Weekly</option>
@@ -409,6 +409,13 @@
       <option value="1m">Monthly</option>
       <option value="3m">Quarterly</option>
       <option value="1y">Yearly</option>
+      <option value="mon">Every Monday</option>
+      <option value="tue">Every Tuesday</option>
+      <option value="wed">Every Wednesday</option>
+      <option value="thu">Every Thursday</option>
+      <option value="fri">Every Friday</option>
+      <option value="sat">Every Saturday</option>
+      <option value="sun">Every Sunday</option>
     </datalist>
   </td>
   <td class="col-pri">
@@ -661,7 +668,7 @@
     </div>
     <div class="mob-field">
       <label>Repeat</label>
-      <input id="mf-rep" type="text" placeholder="1w, 1m…" list="rep-options" class="mob-input">
+      <input id="mf-rep" type="text" placeholder="1w, 1m, fri…" list="rep-options" class="mob-input">
     </div>
   </div>
   <button class="mob-add-submit" onclick="addMobTask()">Add Task</button>
@@ -850,7 +857,11 @@ document.querySelectorAll('.card-cb').forEach(cb => {
 const REPEAT_MAP = {
   'daily':'1d','every day':'1d','weekly':'1w','every week':'1w',
   'biweekly':'2w','every 2 weeks':'2w','fortnightly':'2w',
-  'monthly':'1m','every month':'1m','quarterly':'3m','yearly':'1y','annually':'1y'
+  'monthly':'1m','every month':'1m','quarterly':'3m','yearly':'1y','annually':'1y',
+  'monday':'mon','every monday':'mon','tuesday':'tue','every tuesday':'tue',
+  'wednesday':'wed','every wednesday':'wed','thursday':'thu','every thursday':'thu',
+  'friday':'fri','every friday':'fri','saturday':'sat','every saturday':'sat',
+  'sunday':'sun','every sunday':'sun'
 };
 
 function makeEditable(span) {

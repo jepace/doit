@@ -230,6 +230,41 @@ class TestRecurrence:
         nxt = t.get_next_recurrence()
         assert nxt.due == "2026-06-08"
 
+    def test_weekday_recurrence_next_friday(self):
+        # Weekday recurrence is relative to completion date (today),
+        # advancing to the next occurrence of that weekday (never today).
+        t = self._completed_task("2026-06-01", "fri")
+        today = date.today()
+        ahead = (4 - today.weekday()) % 7 or 7  # 4 = Friday
+        expected = (today + timedelta(days=ahead)).isoformat()
+        nxt = t.get_next_recurrence()
+        assert nxt is not None
+        assert nxt.due == expected
+        assert date.fromisoformat(nxt.due).weekday() == 4
+
+    def test_weekday_recurrence_skips_today(self):
+        # Even if today is the target weekday, advance a full week.
+        today = date.today()
+        wd = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'][today.weekday()]
+        t = self._completed_task("2026-06-01", wd)
+        nxt = t.get_next_recurrence()
+        assert nxt.due == (today + timedelta(days=7)).isoformat()
+
+    def test_weekday_recurrence_multiple_days(self):
+        # Picks the nearest of several listed weekdays.
+        t = self._completed_task("2026-06-01", "mon,wed,fri")
+        today = date.today()
+        targets = {0, 2, 4}
+        ahead = min((wd - today.weekday()) % 7 or 7 for wd in targets)
+        expected = (today + timedelta(days=ahead)).isoformat()
+        nxt = t.get_next_recurrence()
+        assert nxt.due == expected
+        assert date.fromisoformat(nxt.due).weekday() in targets
+
+    def test_invalid_weekday_returns_none(self):
+        t = self._completed_task("2026-06-01", "xyz")
+        assert t.get_next_recurrence() is None
+
     def test_recurrence_clears_done_tag(self):
         t = self._completed_task("2026-06-01", "1w")
         nxt = t.get_next_recurrence()
