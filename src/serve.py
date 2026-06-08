@@ -557,10 +557,18 @@ def tasks_print():
     }
     printable = sort_tasks(printable, sort_prefs)
 
-    # Letter page: 11in − 4cm margins ≈ 933px content height.
-    # Header ≈ 46px, each row = 28px → ~31 rows per page.
-    ROWS_PER_PAGE = 31
-    blank_rows = max(0, ROWS_PER_PAGE - len(printable))
+    # Letter page: 11in − 4cm margins ≈ 933px content. Header ≈ 46px.
+    # Each row = 28px → ~31 rows fit on page 1, ~33 on subsequent pages
+    # (no header). Fill to the next full page boundary.
+    FIRST_PAGE = 31
+    FULL_PAGE  = 33
+    n = len(printable)
+    if n <= FIRST_PAGE:
+        blank_rows = FIRST_PAGE - n
+    else:
+        overflow = n - FIRST_PAGE
+        rows_on_last = overflow % FULL_PAGE
+        blank_rows = (FULL_PAGE - rows_on_last) % FULL_PAGE
 
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks",
