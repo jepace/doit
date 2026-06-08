@@ -12,6 +12,21 @@ from conftest import TEST_EMAIL, TEST_PASSWORD, get_csrf
 from conftest import STOCK_TASKS
 
 
+def _task_ids(authed_client):
+    """Return list of task IDs (stable #id strings) for the current user's tasks."""
+    import user_store as us
+    from task_manager import read_tasks
+    user = us.UserStore.get_by_email(TEST_EMAIL)
+    tasks_file = us._user_dir(user["id"]) / "tasks.md"
+    tasks = read_tasks(tasks_file)
+    return [t.id for t in tasks]
+
+
+def _task_id(authed_client, index: int) -> str:
+    """Return the stable #id of the task at the given index."""
+    return _task_ids(authed_client)[index]
+
+
 # ---------------------------------------------------------------------------
 # Auth: register / login / logout
 # ---------------------------------------------------------------------------
@@ -85,23 +100,25 @@ class TestTasksView:
 
 class TestToggle:
     def test_toggle_complete(self, authed_client):
+        tid = _task_id(authed_client, 0)
         r = authed_client.post(
             "/tasks/toggle",
-            data=json.dumps({"line": 0, "action": "complete"}),
+            data=json.dumps({"line": tid, "action": "complete"}),
             content_type="application/json",
         )
         assert r.status_code == 200
         assert r.get_json()["ok"] is True
 
     def test_toggle_reopen(self, authed_client):
+        tid = _task_id(authed_client, 0)
         authed_client.post(
             "/tasks/toggle",
-            data=json.dumps({"line": 0, "action": "complete"}),
+            data=json.dumps({"line": tid, "action": "complete"}),
             content_type="application/json",
         )
         r = authed_client.post(
             "/tasks/toggle",
-            data=json.dumps({"line": 0, "action": "reopen"}),
+            data=json.dumps({"line": tid, "action": "reopen"}),
             content_type="application/json",
         )
         assert r.get_json()["ok"] is True
@@ -115,9 +132,10 @@ class TestToggle:
         assert r.status_code == 400
 
     def test_toggle_invalid_action_returns_400(self, authed_client):
+        tid = _task_id(authed_client, 0)
         r = authed_client.post(
             "/tasks/toggle",
-            data=json.dumps({"line": 0, "action": "destroy"}),
+            data=json.dumps({"line": tid, "action": "destroy"}),
             content_type="application/json",
         )
         assert r.status_code == 400
@@ -125,7 +143,7 @@ class TestToggle:
     def test_toggle_unauthenticated_redirects(self, client):
         r = client.post(
             "/tasks/toggle",
-            data=json.dumps({"line": 0, "action": "complete"}),
+            data=json.dumps({"line": "abc123", "action": "complete"}),
             content_type="application/json",
         )
         assert r.status_code == 302
@@ -184,48 +202,49 @@ class TestUpdateTask:
         )
 
     def test_update_description(self, authed_client):
-        r = self._update(authed_client, 0, "description", "Updated description")
+        r = self._update(authed_client, _task_id(authed_client, 0), "description", "Updated description")
         assert r.get_json()["ok"] is True
 
     def test_update_priority(self, authed_client):
-        r = self._update(authed_client, 0, "priority", "top")
+        r = self._update(authed_client, _task_id(authed_client, 0), "priority", "top")
         assert r.get_json()["ok"] is True
 
     def test_update_due(self, authed_client):
-        r = self._update(authed_client, 0, "due", "2027-01-01")
+        r = self._update(authed_client, _task_id(authed_client, 0), "due", "2027-01-01")
         assert r.get_json()["ok"] is True
 
     def test_update_context(self, authed_client):
-        r = self._update(authed_client, 0, "context", "home")
+        r = self._update(authed_client, _task_id(authed_client, 0), "context", "home")
         assert r.get_json()["ok"] is True
 
     def test_update_project(self, authed_client):
-        r = self._update(authed_client, 0, "project", "myproj")
+        r = self._update(authed_client, _task_id(authed_client, 0), "project", "myproj")
         assert r.get_json()["ok"] is True
 
     def test_update_recurrence(self, authed_client):
-        r = self._update(authed_client, 0, "recurrence", "2w")
+        r = self._update(authed_client, _task_id(authed_client, 0), "recurrence", "2w")
         assert r.get_json()["ok"] is True
 
     def test_update_start(self, authed_client):
-        r = self._update(authed_client, 0, "start", "2026-06-01")
+        r = self._update(authed_client, _task_id(authed_client, 0), "start", "2026-06-01")
         assert r.get_json()["ok"] is True
 
     def test_update_notes(self, authed_client):
-        r = self._update(authed_client, 0, "notes", "a note here")
+        r = self._update(authed_client, _task_id(authed_client, 0), "notes", "a note here")
         assert r.get_json()["ok"] is True
 
     def test_complete_task(self, authed_client):
-        r = self._update(authed_client, 0, "complete", "true")
+        r = self._update(authed_client, _task_id(authed_client, 0), "complete", "true")
         assert r.get_json()["ok"] is True
 
     def test_reopen_task(self, authed_client):
-        self._update(authed_client, 0, "complete", "true")
-        r = self._update(authed_client, 0, "complete", "false")
+        tid = _task_id(authed_client, 0)
+        self._update(authed_client, tid, "complete", "true")
+        r = self._update(authed_client, tid, "complete", "false")
         assert r.get_json()["ok"] is True
 
     def test_unknown_field_returns_400(self, authed_client):
-        r = self._update(authed_client, 0, "badfield", "x")
+        r = self._update(authed_client, _task_id(authed_client, 0), "badfield", "x")
         assert r.status_code == 400
 
     def test_missing_task_id_returns_400(self, authed_client):
@@ -237,12 +256,17 @@ class TestUpdateTask:
         assert r.status_code == 400
 
     def test_out_of_range_task_id_returns_404(self, authed_client):
-        r = self._update(authed_client, 999, "priority", "high")
+        r = self._update(authed_client, "nonexistent-id", "priority", "high")
         assert r.status_code == 404
 
     def test_complete_recurring_task_returns_next_task(self, authed_client):
-        # Task index 3 is "Write report #rep:1w"
-        r = self._update(authed_client, 3, "complete", "true")
+        import user_store as us
+        from task_manager import read_tasks
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tasks_file = us._user_dir(user["id"]) / "tasks.md"
+        tasks = read_tasks(tasks_file)
+        recurring = next(t for t in tasks if t.recurrence)
+        r = self._update(authed_client, recurring.id, "complete", "true")
         data = r.get_json()
         assert data["ok"] is True
         assert "next_task" in data
@@ -262,43 +286,45 @@ class TestBulkUpdate:
         )
 
     def test_bulk_set_priority(self, authed_client):
-        r = self._bulk(authed_client, "set-priority", [0, 1], "high")
+        ids = _task_ids(authed_client)[:2]
+        r = self._bulk(authed_client, "set-priority", ids, "high")
         assert r.get_json()["ok"] is True
 
     def test_bulk_set_context(self, authed_client):
-        r = self._bulk(authed_client, "set-context", [0], "home")
+        r = self._bulk(authed_client, "set-context", [_task_id(authed_client, 0)], "home")
         assert r.get_json()["ok"] is True
 
     def test_bulk_set_due(self, authed_client):
-        r = self._bulk(authed_client, "set-due", [0, 1], "2027-01-01")
+        ids = _task_ids(authed_client)[:2]
+        r = self._bulk(authed_client, "set-due", ids, "2027-01-01")
         assert r.get_json()["ok"] is True
 
     def test_bulk_set_project(self, authed_client):
-        r = self._bulk(authed_client, "set-project", [0], "bigproject")
+        r = self._bulk(authed_client, "set-project", [_task_id(authed_client, 0)], "bigproject")
         assert r.get_json()["ok"] is True
 
     def test_bulk_delete(self, authed_client):
-        r = self._bulk(authed_client, "delete", [0])
+        r = self._bulk(authed_client, "delete", [_task_id(authed_client, 0)])
         assert r.get_json()["ok"] is True
 
     def test_bulk_out_of_range_skipped(self, authed_client):
-        r = self._bulk(authed_client, "set-priority", [999], "high")
+        r = self._bulk(authed_client, "set-priority", ["nonexistent-id"], "high")
         assert r.get_json()["ok"] is True
 
     def test_bulk_missing_action_returns_400(self, authed_client):
         r = authed_client.post(
             "/tasks/bulk-update",
-            data=json.dumps({"task_ids": [0]}),
+            data=json.dumps({"task_ids": [_task_id(authed_client, 0)]}),
             content_type="application/json",
         )
         assert r.status_code == 400
 
     def test_bulk_unknown_action_returns_400(self, authed_client):
-        r = self._bulk(authed_client, "explode", [0])
+        r = self._bulk(authed_client, "explode", [_task_id(authed_client, 0)])
         assert r.status_code == 400
 
     def test_bulk_unauthenticated_redirects(self, client):
-        r = self._bulk(client, "set-priority", [0], "high")
+        r = self._bulk(client, "set-priority", ["abc123"], "high")
         assert r.status_code == 302
 
     def test_bulk_delete_removes_task_from_file(self, authed_client):
@@ -310,8 +336,9 @@ class TestBulkUpdate:
         from task_manager import read_tasks
         before = read_tasks(tasks_file)
         count_before = len(before)
+        target_id = before[0].id
 
-        r = self._bulk(authed_client, "delete", [0])
+        r = self._bulk(authed_client, "delete", [target_id])
         assert r.get_json()["ok"] is True
 
         after = read_tasks(tasks_file)
@@ -332,13 +359,12 @@ class TestRecurrenceAtomicWrite:
         user = us.UserStore.get_by_email(TEST_EMAIL)
         tasks_file = us._user_dir(user["id"]) / "tasks.md"
 
-        # Write report (#rep:1w) is task index 3 in STOCK_TASKS
         tasks = read_tasks(tasks_file)
-        recurring_idx = next(i for i, t in enumerate(tasks) if t.recurrence)
+        recurring_task = next(t for t in tasks if t.recurrence)
 
         r = authed_client.post(
             "/tasks/update",
-            data=json.dumps({"task_id": recurring_idx, "field": "complete", "value": "true"}),
+            data=json.dumps({"task_id": recurring_task.id, "field": "complete", "value": "true"}),
             content_type="application/json",
         )
         assert r.get_json()["ok"] is True
@@ -503,13 +529,12 @@ class TestNoAnonymousSession:
 # ---------------------------------------------------------------------------
 
 class TestBulkConcurrency:
-    def _get_hash(self, authed_client, task_id):
+    def _get_task(self, authed_client, index):
         from task_manager import read_tasks
         import user_store as us
         user = us.UserStore.get_by_email(TEST_EMAIL)
         tasks_file = us._user_dir(user["id"]) / "tasks.md"
-        tasks = read_tasks(tasks_file)
-        return tasks[task_id].content_hash
+        return read_tasks(tasks_file)[index]
 
     def _bulk_with_hashes(self, client, action, task_ids, hashes, value=""):
         return client.post(
@@ -520,14 +545,18 @@ class TestBulkConcurrency:
         )
 
     def test_bulk_correct_hash_succeeds(self, authed_client):
-        h = self._get_hash(authed_client, 0)
-        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {"0": h}, "high")
+        task = self._get_task(authed_client, 0)
+        r = self._bulk_with_hashes(authed_client, "set-priority", [task.id],
+                                   {task.id: task.content_hash}, "high")
         assert r.get_json()["ok"] is True
 
     def test_bulk_wrong_hash_returns_409(self, authed_client):
-        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {"0": "deadbeef"}, "high")
+        task = self._get_task(authed_client, 0)
+        r = self._bulk_with_hashes(authed_client, "set-priority", [task.id],
+                                   {task.id: "deadbeef"}, "high")
         assert r.status_code == 409
 
     def test_bulk_no_hashes_still_works(self, authed_client):
-        r = self._bulk_with_hashes(authed_client, "set-priority", [0], {}, "high")
+        task = self._get_task(authed_client, 0)
+        r = self._bulk_with_hashes(authed_client, "set-priority", [task.id], {}, "high")
         assert r.get_json()["ok"] is True
