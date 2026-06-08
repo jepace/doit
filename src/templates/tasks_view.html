@@ -996,11 +996,11 @@ function closeNote(id) {
 }
 
 async function saveNote(id) {
-  // Find whichever textarea is visible / has content
   const tas = document.querySelectorAll(`.note-textarea[data-id="${id}"]`);
+  // Use the textarea that's currently visible (inside an open row)
   let val = '';
-  tas.forEach(ta => { val = ta.value; });
-  // Sync all textareas for this id
+  tas.forEach(ta => { if (ta.closest('.note-row.open, .card-note-row.open')) val = ta.value; });
+  // Sync all textareas
   tas.forEach(ta => { ta.value = val; });
 
   await apiUpdate(id, 'notes', val);
