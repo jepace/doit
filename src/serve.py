@@ -556,8 +556,15 @@ def tasks_print():
         "sort_dir3": qp("sd3", "sort_dir3") or "asc",
     }
     printable = sort_tasks(printable, sort_prefs)
+
+    # Letter page: 11in − 4cm margins ≈ 933px content height.
+    # Header ≈ 46px, each row = 28px → ~31 rows per page.
+    ROWS_PER_PAGE = 31
+    blank_rows = max(0, ROWS_PER_PAGE - len(printable))
+
     return render_template("print.html", tasks=printable,
-                           today=today, active="tasks")
+                           today=today, active="tasks",
+                           blank_rows=blank_rows)
 
 
 @app.route("/tasks/toggle", methods=["POST"])
