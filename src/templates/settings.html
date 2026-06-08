@@ -96,24 +96,31 @@
     <div class="section">
       <h2>Task List Defaults</h2>
 
-      <div class="field">
-        <label for="sort_col">Default Sort Column</label>
-        <select id="sort_col" name="sort_col">
-          {% for val, lbl in [("due","Due Date"), ("priority","Priority"),
-                               ("context","Context"), ("description","Task Name"),
-                               ("start","Start Date")] %}
-          <option value="{{ val }}" {% if prefs.sort_col == val %}selected{% endif %}>{{ lbl }}</option>
-          {% endfor %}
-        </select>
-      </div>
+      {% set sort_cols = [("due","Due Date"), ("priority","Priority"), ("context","Context"), ("description","Task Name"), ("start","Start Date")] %}
 
-      <div class="field">
-        <label for="sort_dir">Default Sort Direction</label>
-        <select id="sort_dir" name="sort_dir">
-          <option value="asc"  {% if prefs.sort_dir == "asc"  %}selected{% endif %}>Ascending</option>
-          <option value="desc" {% if prefs.sort_dir == "desc" %}selected{% endif %}>Descending</option>
-        </select>
+      {% for n, col_key, dir_key, label in [
+            (1, "sort_col",  "sort_dir",  "Sort by (primary)"),
+            (2, "sort_col2", "sort_dir2", "Then by (secondary)"),
+            (3, "sort_col3", "sort_dir3", "Then by (tertiary)")] %}
+      <div class="field" style="display:flex; gap:8px; align-items:flex-end;">
+        <div style="flex:1">
+          <label for="{{ col_key }}">{{ label }}</label>
+          <select id="{{ col_key }}" name="{{ col_key }}">
+            {% if n > 1 %}<option value="" {% if not prefs[col_key] %}selected{% endif %}>— none —</option>{% endif %}
+            {% for val, lbl in sort_cols %}
+            <option value="{{ val }}" {% if prefs[col_key] == val %}selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="flex:0 0 110px">
+          <label for="{{ dir_key }}">Direction</label>
+          <select id="{{ dir_key }}" name="{{ dir_key }}">
+            <option value="asc"  {% if prefs[dir_key] == "asc"  %}selected{% endif %}>Ascending</option>
+            <option value="desc" {% if prefs[dir_key] == "desc" %}selected{% endif %}>Descending</option>
+          </select>
+        </div>
       </div>
+      {% endfor %}
     </div>
 
     <button type="submit" class="btn-save">Save Preferences</button>
