@@ -560,7 +560,7 @@ def tasks_print():
     # Letter page: 11in − 4cm margins ≈ 933px content. Header ≈ 46px.
     # Each row = 28px → ~31 rows fit on page 1, ~33 on subsequent pages
     # (no header). Fill to the next full page boundary.
-    FIRST_PAGE = 31
+    FIRST_PAGE = 30
     FULL_PAGE  = 33
     n = len(printable)
     if n <= FIRST_PAGE:
