@@ -1418,7 +1418,7 @@ document.getElementById('f-pri').addEventListener('keydown', e => { if (e.key ==
 function openMobAdd() {
   document.getElementById('mob-add-overlay').classList.add('open');
   document.getElementById('mob-add-sheet').classList.add('open');
-  setTimeout(() => document.getElementById('mf-task').focus(), 100);
+  document.getElementById('mf-task').focus();
 }
 function closeMobAdd(e) {
   if (e && e.target !== document.getElementById('mob-add-overlay')) return;
