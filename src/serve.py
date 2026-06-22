@@ -22,7 +22,7 @@ from pathlib import Path
 
 try:
     from flask import (Flask, g, abort, flash, redirect, render_template,
-                       request, session, url_for)
+                       request, send_from_directory, session, url_for)
     from werkzeug.middleware.proxy_fix import ProxyFix
 except ImportError:
     sys.exit("Error: flask not installed. Run: pip install flask")
@@ -515,6 +515,15 @@ def _add_task(text: str, section: str = "Inbox") -> None:
 def tasks_legacy():
     # Old bookmarks/links — redirect to the canonical root URL.
     return redirect(url_for("tasks"))
+
+
+@app.route("/favicon.ico")
+def favicon():
+    # Browsers auto-request /favicon.ico on every page (even ones whose
+    # template lacks an explicit <link rel="icon">), so serve it here to
+    # keep the tab icon from disappearing on standalone pages like print.
+    return send_from_directory(app.static_folder, "favicon.svg",
+                               mimetype="image/svg+xml")
 
 
 @app.route("/")
