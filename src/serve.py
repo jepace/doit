@@ -531,6 +531,14 @@ def favicon():
 def tasks():
     tasks_file   = _get_tasks_file()
     all_tasks    = read_tasks(tasks_file)
+    # If any task is missing a stable #id, persist IDs for all tasks now so
+    # that content_hash values are stable before the client stores them.
+    # Without this, the first write (e.g. completing task A) assigns #id to
+    # task B, changing its hash, causing a spurious 409 on the next update.
+    if any(not t.id for t in all_tasks):
+        with get_user_lock(g.user["id"]):
+            write_tasks(all_tasks, tasks_file)
+        all_tasks = read_tasks(tasks_file)
     tasks_list   = [t for t in all_tasks if t.section != "Archive"]
     archive_list = [t for t in all_tasks if t.section == "Archive"]
     prefs      = UserStore.get_prefs(g.user["id"])
