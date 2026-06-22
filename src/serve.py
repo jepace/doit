@@ -646,9 +646,9 @@ def tasks_update():
 
         # Optimistic concurrency check: if the client sent a hash, verify the task
         # hasn't changed since the page was rendered (e.g. edit in another tab).
-        # Skip the check for 'complete' — checking off two tasks in quick succession
-        # rewrites the file between requests, making sibling hashes look stale.
-        if task_hash and field != "complete" and task.content_hash != task_hash:
+        if task_hash and task.content_hash != task_hash:
+            log.warning("Hash conflict: task %s field=%s sent=%s have=%s",
+                        task_id, field, task_hash, task.content_hash)
             return {"error": "conflict", "message": "Task has changed — please refresh."}, 409
 
         if field == "description":
