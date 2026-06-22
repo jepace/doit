@@ -825,10 +825,18 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       card?.classList.add('completing');
       if (completionTimeouts[id]) clearTimeout(completionTimeouts[id]);
       completionTimeouts[id] = setTimeout(async () => {
+        delete completionTimeouts[id];
         const data = await apiUpdate(id, 'complete', 'true');
         row?.classList.remove('completing');
-        row?.classList.add('completed');
         card?.classList.remove('completing');
+        if (!data || !data.ok) {
+          // Server didn't save it — revert the checkbox so it's not a phantom done.
+          cb.checked = false;
+          if (cardCb) cardCb.checked = false;
+          alert('Could not mark this task done — please try again.');
+          return;
+        }
+        row?.classList.add('completed');
         card?.classList.add('completed');
         if (!showDoneCb.checked) {
           if (row) row.style.display = 'none';
@@ -838,9 +846,8 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
           if (tnr) tnr.style.display = 'none';
           if (cnr) cnr.style.display = 'none';
         }
-        delete completionTimeouts[id];
         buildCardGroups();  // refresh mobile group counts now this card is hidden
-        if (data && data.next_task) setTimeout(() => reloadPage(), 800);
+        if (data.next_task) setTimeout(() => reloadPage(), 800);
       }, 2000);
     } else {
       if (completionTimeouts[id]) {
