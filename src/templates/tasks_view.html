@@ -840,7 +840,7 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
         }
         delete completionTimeouts[id];
         buildCardGroups();  // refresh mobile group counts now this card is hidden
-        if (data && data.next_task) setTimeout(() => location.reload(), 800);
+        if (data && data.next_task) setTimeout(() => reloadPage(), 800);
       }, 2000);
     } else {
       if (completionTimeouts[id]) {
@@ -1050,7 +1050,7 @@ async function apiBulk(action, ids, value) {
   if (r.status === 409) {
     alert('One or more tasks changed in another tab. Refreshing.');
   }
-  location.reload();
+  reloadPage();
 }
 
 document.querySelectorAll('.bulk-item').forEach(item => {
@@ -1358,6 +1358,12 @@ applyFilters();
   const page = document.querySelector('.page');
   if (!page) return;
   const KEY = 'tasks-scroll-top';
+  // reloadPage() saves scroll explicitly before reloading; more reliable
+  // than beforeunload which doesn't always fire on programmatic reloads.
+  window.reloadPage = () => {
+    sessionStorage.setItem(KEY, String(page.scrollTop));
+    location.reload();
+  };
   window.addEventListener('beforeunload', () => {
     sessionStorage.setItem(KEY, String(page.scrollTop));
   });
@@ -1417,7 +1423,7 @@ async function addTask() {
     document.getElementById('f-rep').value = '';
     document.getElementById('f-due').value = today;
     document.getElementById('f-start').value = today;
-    location.reload();
+    reloadPage();
   } else {
     alert('Error adding task');
   }
@@ -1466,7 +1472,7 @@ async function addMobTask() {
     method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
     body: JSON.stringify({text: fullText, section:'Inbox'})
   });
-  if (res.ok) { location.reload(); }
+  if (res.ok) { reloadPage(); }
   else { alert('Error adding task'); }
 }
 
