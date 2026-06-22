@@ -10,6 +10,7 @@ Usage:
 import functools
 import logging
 import logging.config
+import math
 import os
 import re
 import secrets
@@ -558,17 +559,20 @@ def tasks_print():
     printable = sort_tasks(printable, sort_prefs)
 
     # Letter page: 11in − 4cm margins ≈ 933px content. Header ≈ 46px.
-    # Each row = 28px → ~31 rows fit on page 1, ~33 on subsequent pages
-    # (no header). Fill to the next full page boundary.
+    # Each row = 28px → ~30 rows fit on page 1, ~32 on subsequent pages
+    # (no header). Round up to an EVEN number of pages so the back side of
+    # every sheet is lined too (handy for double-sided printing).
     FIRST_PAGE = 30
-    FULL_PAGE  = 33
+    FULL_PAGE  = 32
     n = len(printable)
     if n <= FIRST_PAGE:
-        blank_rows = FIRST_PAGE - n
+        pages = 1
     else:
-        overflow = n - FIRST_PAGE
-        rows_on_last = overflow % FULL_PAGE
-        blank_rows = (FULL_PAGE - rows_on_last) % FULL_PAGE
+        pages = 1 + math.ceil((n - FIRST_PAGE) / FULL_PAGE)
+    if pages % 2 == 1:
+        pages += 1
+    capacity = FIRST_PAGE + (pages - 1) * FULL_PAGE
+    blank_rows = capacity - n
 
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks",
