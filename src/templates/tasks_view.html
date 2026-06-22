@@ -1349,6 +1349,25 @@ function buildCardGroups() {
 buildCardGroups();
 applyFilters();
 
+// ── Preserve scroll position across reloads ───────────────────
+// .page is a custom scroll container (overflow-y:auto), so the browser
+// won't restore its scrollTop on reload — every location.reload() would
+// otherwise snap back to the top. Save it before unload, restore it after
+// the table/cards have been re-sorted and rendered above.
+(function() {
+  const page = document.querySelector('.page');
+  if (!page) return;
+  const KEY = 'tasks-scroll-top';
+  window.addEventListener('beforeunload', () => {
+    sessionStorage.setItem(KEY, String(page.scrollTop));
+  });
+  const saved = sessionStorage.getItem(KEY);
+  if (saved !== null) {
+    page.scrollTop = parseInt(saved, 10) || 0;
+    sessionStorage.removeItem(KEY);
+  }
+})();
+
 // Keep the print link in sync with the current localStorage sort state
 (function() {
   const link = document.getElementById('print-link');
