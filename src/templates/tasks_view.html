@@ -164,6 +164,9 @@
   .group-header-row.grp-today td {
     background: #ff950015 !important; color: #ff9500; border-top-color: #ff9500;
   }
+  .group-header-row.grp-tomorrow td {
+    background: #ffcc0015 !important; color: #b8860b; border-top-color: #b8860b;
+  }
   .group-header-row.grp-week td {
     background: #0a84ff18 !important; color: #0a84ff; border-top-color: #0a84ff;
   }
@@ -244,8 +247,9 @@
     }
     .card-group-hdr:first-child { border-top: none; }
     .card-group-hdr.grp-overdue { color: var(--danger); background: #ff3b3010; border-top-color: var(--danger); }
-    .card-group-hdr.grp-today   { color: #ff9500; background: #ff950010; border-top-color: #ff9500; }
-    .card-group-hdr.grp-week    { color: #0a84ff; background: #0a84ff10; border-top-color: #0a84ff; }
+    .card-group-hdr.grp-today    { color: #ff9500; background: #ff950010; border-top-color: #ff9500; }
+    .card-group-hdr.grp-tomorrow { color: #b8860b; background: #ffcc0010; border-top-color: #b8860b; }
+    .card-group-hdr.grp-week     { color: #0a84ff; background: #0a84ff10; border-top-color: #0a84ff; }
     .card-group-hdr.grp-month   { color: #bf5af2; background: #bf5af210; border-top-color: #bf5af2; }
     .card-group-hdr.grp-future  { color: #32ade6; background: #32ade610; border-top-color: #32ade6; }
     .card-group-count { font-size: 11px; font-weight: 600; opacity: .7; }
@@ -460,7 +464,7 @@
       <option value="overdue">Overdue</option>
       <option value="today">Due today</option>
       <option value="overdue-today">Overdue + today</option>
-      <option value="week">Next 7 days</option>
+      <option value="week">This week</option>
       <option value="none">No due date</option>
     </select>
     <select id="filter-pri" data-filter="priority" title="Filter by priority">
@@ -1162,10 +1166,12 @@ function colVal(row, col) {
 
 function dateGroup(due) {
   if (!due || due === '—') return {cls:'grp-none', label:'No due date'};
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0,10);
   const d7 = new Date(Date.now() + 7*86400000).toISOString().slice(0,10);
-  if (due < today)    return {cls:'grp-overdue', label:'Overdue'};
-  if (due === today)  return {cls:'grp-today',   label:'Today'};
-  if (due <= d7)      return {cls:'grp-week',    label:'Next 7 days'};
+  if (due < today)       return {cls:'grp-overdue',   label:'Overdue'};
+  if (due === today)     return {cls:'grp-today',     label:'Today'};
+  if (due === tomorrow)  return {cls:'grp-tomorrow',  label:'Tomorrow'};
+  if (due <= d7)         return {cls:'grp-week',      label:'This week'};
 
   const ym  = due.slice(0,7);
   const [yr, mo] = ym.split('-').map(Number);
