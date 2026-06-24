@@ -580,7 +580,7 @@ def tasks_print():
     # (no header). Round up to an EVEN number of pages so the back side of
     # every sheet is lined too (handy for double-sided printing).
     FIRST_PAGE = 30
-    FULL_PAGE  = 32
+    FULL_PAGE  = 31  # 32 rows minus 1 for the "Do It!" header on pages 2+
     n = len(printable)
     if n <= FIRST_PAGE:
         pages = 1
