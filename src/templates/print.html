@@ -91,14 +91,22 @@
       line-height: 28px;
     }
 
+    .page-break-header {
+      display: none;
+    }
     @media print {
       .screen-only { display: none !important; }
       body { background: #fff; }
       .page-body { margin: 0; padding: 0; box-shadow: none; width: auto; min-height: 0; }
       @page { margin: 2cm 2.2cm; size: 8.5in 11in portrait; }
-      @page :left  { @top-left   { content: "Do It!"; font-family: -apple-system, sans-serif; font-size: 12px; font-weight: 700; } }
-      @page :right { @top-left   { content: "Do It!"; font-family: -apple-system, sans-serif; font-size: 12px; font-weight: 700; } }
-      @page :first { @top-left   { content: ""; } }
+      .page-break-header {
+        display: flex;
+        align-items: baseline;
+        break-before: page;
+        font-size: 14px;
+        font-weight: 700;
+        margin-bottom: 10px;
+      }
     }
   </style>
 </head>
@@ -116,6 +124,10 @@
     </div>
 
     {% for task in tasks %}
+    {% set i = loop.index0 %}
+    {% if i > 0 and (i - first_page) % full_page == 0 and i >= first_page %}
+    <div class="page-break-header">Do It!</div>
+    {% endif %}
     <div class="task-row">
       <div class="check-box"></div>
       <span class="task-name">{{ task.description }}</span>
@@ -124,7 +136,11 @@
     </div>
     {% endfor %}
 
-    {% for _ in range(blank_rows) %}
+    {% for i in range(blank_rows) %}
+    {% set abs_i = tasks|length + i %}
+    {% if abs_i > 0 and (abs_i - first_page) % full_page == 0 and abs_i >= first_page %}
+    <div class="page-break-header">Do It!</div>
+    {% endif %}
     <div class="blank-row">
       <div class="check-box"></div>
       <div class="task-line"></div>

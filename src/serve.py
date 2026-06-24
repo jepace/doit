@@ -593,7 +593,8 @@ def tasks_print():
 
     return render_template("print.html", tasks=printable,
                            today=today, active="tasks",
-                           blank_rows=blank_rows)
+                           blank_rows=blank_rows,
+                           first_page=FIRST_PAGE, full_page=FULL_PAGE)
 
 
 @app.route("/tasks/toggle", methods=["POST"])
