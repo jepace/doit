@@ -91,20 +91,14 @@
       line-height: 28px;
     }
 
-    .page-running-header { display: none; }
     @media print {
       .screen-only { display: none !important; }
       body { background: #fff; }
       .page-body { margin: 0; padding: 0; box-shadow: none; width: auto; min-height: 0; }
       @page { margin: 2cm 2.2cm; size: 8.5in 11in portrait; }
-      .page-running-header {
-        display: block;
-        position: fixed;
-        top: 0; left: 0; right: 0;
-        font-size: 13px; font-weight: 700;
-        padding-bottom: 6px;
-        border-bottom: 1px solid #bbb;
-      }
+      @page :left  { @top-left   { content: "Do It!"; font-family: -apple-system, sans-serif; font-size: 12px; font-weight: 700; } }
+      @page :right { @top-left   { content: "Do It!"; font-family: -apple-system, sans-serif; font-size: 12px; font-weight: 700; } }
+      @page :first { @top-left   { content: ""; } }
     }
   </style>
 </head>
@@ -115,8 +109,6 @@
     <span style="font-size:14px;color:#555;">{{ today }}</span>
     <button class="btn-print" onclick="window.print()">Save as PDF / Print</button>
   </div>
-
-  <div class="page-running-header">Do It!</div>
 
   <div class="page-body">
     <div class="print-header">
