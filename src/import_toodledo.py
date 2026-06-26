@@ -112,8 +112,8 @@ def row_to_line(row: dict) -> tuple[str, str]:
 
     tags = {}
 
-    # Context: prefer CONTEXT, fall back to FOLDER
-    ctx = (row.get("CONTEXT") or row.get("FOLDER") or "").strip()
+    # Context: only use CONTEXT field — FOLDER is a list/category, not a context
+    ctx = (row.get("CONTEXT") or "").strip()
     if ctx:
         tags["#ctx"] = ctx
 
