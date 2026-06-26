@@ -195,6 +195,12 @@ def import_csv(csv_path: Path, tasks_file: Path, dry_run: bool) -> int:
                     print(f"  {nl}")
         return len(imported)
 
+    # Back up before touching anything
+    from datetime import datetime
+    backup = tasks_file.with_suffix(f".bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    backup.write_text(tasks_file.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"Backup saved to {backup}")
+
     # Read existing tasks and append new ones under Inbox
     existing = read_tasks(tasks_file)
     # Build extra_lines: task line + indented notes
