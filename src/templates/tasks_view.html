@@ -256,25 +256,51 @@
 
     /* Task card */
     .task-card {
+      position: relative; overflow: hidden;
+      border-bottom: 1px solid var(--border);
+    }
+    .card-inner {
       display: flex; align-items: center; gap: 12px;
       padding: 10px 14px;
-      border-bottom: 1px solid var(--border);
       background: var(--bg);
-      transition: background .15s;
+      position: relative; z-index: 1;
+      will-change: transform;
+      transition: transform .25s cubic-bezier(.25,.46,.45,.94);
     }
-    .task-card:active { background: var(--bg3); }
-    .task-card.completed { opacity: .45; }
+    .card-inner:active { background: var(--bg3); }
+    .task-card.completed .card-inner { opacity: .45; }
     .task-card.completing .card-title { text-decoration: line-through; opacity: .6; }
 
     /* Priority left border on card */
-    .task-card.pri-top    { border-left: 3px solid #ff3b30;
+    .task-card.pri-top  .card-inner  { border-left: 3px solid #ff3b30;
                              background: color-mix(in srgb, #ff3b30 6%, var(--bg2)); }
-    .task-card.pri-top  .card-title { font-weight: 700; }
-    .task-card.pri-high .card-title { font-weight: 600; }
-    .task-card.pri-high   { border-left: 3px solid #ff9500;
+    .task-card.pri-top  .card-title  { font-weight: 700; }
+    .task-card.pri-high .card-title  { font-weight: 600; }
+    .task-card.pri-high .card-inner  { border-left: 3px solid #ff9500;
                              background: color-mix(in srgb, #ff9500 5%, var(--bg2)); }
-    .task-card.pri-medium { border-left: 3px solid #007aff; }
-    .task-card.pri-low    { border-left: 3px solid #8e8e93; }
+    .task-card.pri-medium .card-inner { border-left: 3px solid #007aff; }
+    .task-card.pri-low    .card-inner { border-left: 3px solid #8e8e93; }
+
+    /* Swipe action panels (behind the card-inner) */
+    .card-bg-left {
+      position: absolute; left: 0; top: 0; bottom: 0;
+      display: flex; align-items: stretch; z-index: 0;
+    }
+    .card-bg-right {
+      position: absolute; right: 0; top: 0; bottom: 0;
+      display: flex; align-items: stretch; z-index: 0;
+    }
+    .swipe-btn {
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 3px;
+      width: 80px; font-size: 20px; color: #fff; border: none;
+      cursor: pointer; user-select: none; -webkit-user-select: none;
+      line-height: 1; font-family: inherit;
+    }
+    .swipe-btn span { font-size: 10px; font-weight: 600; letter-spacing: .02em; }
+    .swipe-note-btn   { background: #0a84ff; }
+    .swipe-delete-btn { background: #ff3b30; }
+    .swipe-done-btn   { background: #30d158; }
 
     .card-cb-wrap { flex-shrink: 0; }
     .card-cb {
@@ -602,25 +628,34 @@
        data-due="{{ task.due or '' }}"
        data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}"
        data-complete="{{ 'true' if task.complete else 'false' }}">
-    <div class="card-cb-wrap">
-      <input type="checkbox" class="card-cb" autocomplete="off"
-             data-id="{{ task.id }}"
-             {% if task.complete %}checked{% endif %}>
+    <div class="card-bg-left">
+      <button class="swipe-btn swipe-note-btn" data-id="{{ task.id }}">📝<span>Note</span></button>
+      <button class="swipe-btn swipe-delete-btn" data-id="{{ task.id }}">🗑<span>Delete</span></button>
     </div>
-    <div class="card-main">
-      <div class="card-title ecell task-name-text"
-           data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</div>
-      <div class="card-meta">
-        <span class="card-due ecell{% if not task.due %} empty{% endif %}"
-              data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span>
-        {% if task.context %}<span class="card-ctx ecell"
-              data-id="{{ task.id }}" data-field="context">{{ task.context }}</span>{% endif %}
-        {% if task.recurrence %}<span class="card-rec" title="{{ task.recurrence }}">🔁</span>{% endif %}
+    <div class="card-bg-right">
+      <button class="swipe-btn swipe-done-btn" data-id="{{ task.id }}">✓<span>Done</span></button>
+    </div>
+    <div class="card-inner">
+      <div class="card-cb-wrap">
+        <input type="checkbox" class="card-cb" autocomplete="off"
+               data-id="{{ task.id }}"
+               {% if task.complete %}checked{% endif %}>
       </div>
-    </div>
-    <div class="card-right">
-      <button class="card-note-btn{% if task.notes %} has-note{% endif %}"
-              data-id="{{ task.id }}">{% if task.notes %}📝{% else %}＋{% endif %}</button>
+      <div class="card-main">
+        <div class="card-title ecell task-name-text"
+             data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</div>
+        <div class="card-meta">
+          <span class="card-due ecell{% if not task.due %} empty{% endif %}"
+                data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span>
+          {% if task.context %}<span class="card-ctx ecell"
+                data-id="{{ task.id }}" data-field="context">{{ task.context }}</span>{% endif %}
+          {% if task.recurrence %}<span class="card-rec" title="{{ task.recurrence }}">🔁</span>{% endif %}
+        </div>
+      </div>
+      <div class="card-right">
+        <button class="card-note-btn{% if task.notes %} has-note{% endif %}"
+                data-id="{{ task.id }}">{% if task.notes %}📝{% else %}＋{% endif %}</button>
+      </div>
     </div>
   </div>
   <div class="card-note-row" data-id="{{ task.id }}">
@@ -1563,6 +1598,109 @@ async function apiUpdate(id, field, value) {
 
   page.addEventListener('touchend', endPull, { passive: true });
   page.addEventListener('touchcancel', endPull, { passive: true });
+})();
+
+// ── Card swipe gestures (mobile) ─────────────────────────────
+(function() {
+  const REVEAL_W   = 160;  // px: width of note+delete panel
+  const DONE_W     =  80;  // px: width of done panel
+  const OPEN_AT    = 100;  // px of right-swipe to latch open
+  const DONE_AT    = 110;  // px of left-swipe to auto-trigger done
+  let openInner    = null; // currently latched-open card-inner
+
+  function snapBack(inner, animate) {
+    if (animate !== false) inner.style.transition = 'transform .25s ease';
+    inner.style.transform = '';
+    if (openInner === inner) openInner = null;
+  }
+
+  function latchOpen(inner) {
+    inner.style.transition = 'transform .25s ease';
+    inner.style.transform = `translateX(${REVEAL_W}px)`;
+    openInner = inner;
+  }
+
+  // Tap outside to close latched card
+  document.addEventListener('touchstart', (e) => {
+    if (!openInner) return;
+    if (!openInner.closest('.task-card').contains(e.target)) snapBack(openInner);
+  }, { passive: true });
+
+  document.querySelectorAll('#card-list .task-card').forEach(card => {
+    const inner = card.querySelector('.card-inner');
+    if (!inner) return;
+    let x0 = 0, y0 = 0, dx = 0, axis = null, active = false;
+
+    inner.addEventListener('touchstart', (e) => {
+      if (openInner && openInner !== inner) snapBack(openInner);
+      x0 = e.touches[0].clientX;
+      y0 = e.touches[0].clientY;
+      dx = 0; axis = null; active = true;
+      inner.style.transition = 'none';
+    }, { passive: true });
+
+    inner.addEventListener('touchmove', (e) => {
+      if (!active) return;
+      const cx = e.touches[0].clientX, cy = e.touches[0].clientY;
+      dx = cx - x0;
+      if (!axis) {
+        const adx = Math.abs(dx), ady = Math.abs(cy - y0);
+        if (adx < 4 && ady < 4) return;
+        axis = adx >= ady ? 'h' : 'v';
+      }
+      if (axis === 'v') { active = false; return; }
+      e.preventDefault();
+      const clamped = Math.max(-(DONE_W * 2), Math.min(REVEAL_W, dx));
+      inner.style.transform = `translateX(${clamped}px)`;
+    }, { passive: false });
+
+    function onEnd() {
+      if (!active) return;
+      active = false;
+      if (dx <= -DONE_AT) {
+        // Full left-swipe: animate off screen then trigger done
+        inner.style.transition = 'transform .2s ease';
+        inner.style.transform = 'translateX(-110vw)';
+        setTimeout(() => {
+          const primary = document.querySelector(`.primary-cb[data-id="${card.dataset.id}"]`);
+          if (primary && !primary.checked) {
+            primary.checked = true;
+            primary.dispatchEvent(new Event('change'));
+          }
+          snapBack(inner, false);
+        }, 220);
+      } else if (dx < 0) {
+        snapBack(inner);
+      } else if (dx >= OPEN_AT) {
+        latchOpen(inner);
+      } else {
+        snapBack(inner);
+      }
+    }
+
+    inner.addEventListener('touchend',   onEnd, { passive: true });
+    inner.addEventListener('touchcancel', onEnd, { passive: true });
+  });
+
+  // Swipe button actions
+  document.querySelectorAll('#card-list .swipe-done-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const primary = document.querySelector(`.primary-cb[data-id="${id}"]`);
+      if (primary && !primary.checked) { primary.checked = true; primary.dispatchEvent(new Event('change')); }
+    });
+  });
+  document.querySelectorAll('#card-list .swipe-delete-btn').forEach(btn => {
+    btn.addEventListener('click', () => deleteTask(btn.dataset.id));
+  });
+  document.querySelectorAll('#card-list .swipe-note-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.id;
+      const inner = btn.closest('.task-card')?.querySelector('.card-inner');
+      if (inner) snapBack(inner);
+      document.querySelector(`.card-note-btn[data-id="${id}"]`)?.click();
+    });
+  });
 })();
 
 // ── Keyboard shortcuts ────────────────────────────────────────
