@@ -1,0 +1,84 @@
+#!/bin/sh
+#
+# PROVIDE: doit
+# REQUIRE: NETWORKING LOGIN
+# KEYWORD: shutdown
+#
+# Add these lines to /etc/rc.conf inside the jail to enable:
+#   doit_enable="YES"
+#
+# Optional overrides (rc.conf or /etc/rc.conf.d/doit):
+#   doit_user="www"
+#   doit_dir="/var/www/doit"
+#   doit_python="/usr/local/bin/python3"
+#   doit_logfile="/var/log/doit.log"
+
+. /etc/rc.subr
+
+name="doit"
+rcvar="doit_enable"
+desc="Do It! task manager"
+
+load_rc_config "${name}"
+
+: ${doit_enable:="NO"}
+: ${doit_user:="www"}
+: ${doit_dir:="/var/www/doit"}
+: ${doit_python:="/usr/local/bin/python3"}
+: ${doit_logfile:="/var/log/doit.log"}
+
+pidfile="/var/run/${name}.pid"
+
+start_cmd="${name}_start"
+stop_cmd="${name}_stop"
+status_cmd="${name}_status"
+restart_cmd="${name}_restart"
+extra_commands="status restart"
+
+doit_start() {
+    echo "Starting ${desc}."
+    /usr/sbin/daemon \
+        -p "${pidfile}" \
+        -u "${doit_user}" \
+        -o "${doit_logfile}" \
+        -r \
+        "${doit_python}" "${doit_dir}/src/serve.py"
+    echo "${desc} started."
+}
+
+doit_stop() {
+    if [ ! -f "${pidfile}" ]; then
+        echo "${desc} is not running (no pidfile)."
+        return 0
+    fi
+    pid=$(cat "${pidfile}")
+    if kill -0 "${pid}" 2>/dev/null; then
+        echo "Stopping ${desc} (pid ${pid})."
+        kill "${pid}"
+        # Wait up to 10s for clean shutdown
+        i=0
+        while kill -0 "${pid}" 2>/dev/null && [ $i -lt 20 ]; do
+            sleep 0.5
+            i=$((i + 1))
+        done
+        kill -0 "${pid}" 2>/dev/null && kill -9 "${pid}"
+    fi
+    rm -f "${pidfile}"
+    echo "${desc} stopped."
+}
+
+doit_status() {
+    if [ -f "${pidfile}" ] && kill -0 "$(cat "${pidfile}")" 2>/dev/null; then
+        echo "${desc} is running as pid $(cat "${pidfile}")."
+    else
+        echo "${desc} is not running."
+    fi
+}
+
+doit_restart() {
+    doit_stop
+    sleep 1
+    doit_start
+}
+
+run_rc_command "$1"

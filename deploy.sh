@@ -3,9 +3,10 @@
 #
 # Usage: ./deploy.sh [--dry-run]
 #
-# Two variables to adjust if the jail is moved:
+# Adjust these if the jail is moved:
 JAIL_ROOT="/usr/local/bastille/jails/doit/root"
 APP_DIR="/var/www/doit"
+RC_DEST="${JAIL_ROOT}/usr/local/etc/rc.d"
 
 DEST="${JAIL_ROOT}${APP_DIR}"
 
@@ -48,6 +49,16 @@ else
     echo "==> config.json already exists in jail — not overwriting"
 fi
 
+# rc.d service script
+echo "==> Installing rc.d service script to ${RC_DEST}/doit"
+if [ -n "${DRY_RUN}" ]; then
+    echo "    [dry-run] would copy rc.d/doit -> ${RC_DEST}/doit (mode 755)"
+else
+    mkdir -p "${RC_DEST}"
+    cp "${SCRIPT_DIR}/rc.d/doit" "${RC_DEST}/doit"
+    chmod 755 "${RC_DEST}/doit"
+fi
+
 echo ""
 echo "==> Done. Files in ${DEST}:"
 ls "${DEST}"
@@ -56,5 +67,10 @@ echo "If this is a first deploy, remember to:"
 echo "  1. Edit ${DEST}/config.json"
 echo "  2. Install dependencies inside the jail:"
 echo "       bastille cmd doit pip install -r ${APP_DIR}/requirements.txt"
-echo "  3. Start the server:"
-echo "       bastille cmd doit python3 ${APP_DIR}/src/serve.py"
+echo "  3. Enable and start the service:"
+echo "       bastille cmd doit sysrc doit_enable=YES"
+echo "       bastille cmd doit service doit start"
+echo ""
+echo "To manage the service:"
+echo "       bastille cmd doit service doit start|stop|restart|status"
+echo "       bastille cmd doit tail -f /var/log/doit.log"
