@@ -853,6 +853,15 @@ document.querySelectorAll('.filter-bar select[data-filter]').forEach(sel => {
 // Used instead of instant display:none to avoid layout jumps.
 function collapseCard(card, cnr, done) {
   const DURATION = 240;
+  // If the card isn't actually visible (e.g. desktop, where the mobile card
+  // list is display:none), skip the animation entirely and finish now — no
+  // pointless 240ms delay before the follow-up work runs.
+  if (!card || card.offsetParent === null) {
+    if (card) card.style.display = 'none';
+    if (cnr)  cnr.style.display  = 'none';
+    if (done) done();
+    return;
+  }
   function collapseEl(el) {
     if (!el) return;
     el.style.overflow = 'hidden';
@@ -878,6 +887,29 @@ function collapseCard(card, cnr, done) {
     });
     if (done) done();
   }, DURATION + 20);
+}
+
+// Keep the viewport visually stable across a DOM mutation. Anchors on the first
+// visible row/card at or below the top of the scroll container, runs fn, then
+// adjusts scrollTop so that anchor stays put — even if content above it (other
+// rows, group headers) changed height. Numeric scrollTop preservation alone
+// fails here because a full re-sort changes what sits above the viewport.
+function withScrollAnchor(sel, excludeId, fn) {
+  const page = document.querySelector('.page');
+  if (!page) { fn(); return; }
+  const pageTop = page.getBoundingClientRect().top;
+  let anchor = null, anchorTop = 0;
+  for (const el of document.querySelectorAll(sel)) {
+    if (excludeId && el.dataset.id === excludeId) continue;
+    if (el.offsetParent === null) continue;  // skip hidden
+    const top = el.getBoundingClientRect().top;
+    if (top >= pageTop - 1) { anchor = el; anchorTop = top; break; }
+  }
+  fn();
+  if (anchor && anchor.isConnected) {
+    const delta = anchor.getBoundingClientRect().top - anchorTop;
+    if (delta) page.scrollTop += delta;
+  }
 }
 
 // Shared post-completion DOM update. Called after the API confirms done.
@@ -918,11 +950,13 @@ async function applyCompletion(id, animate) {
   };
 
   if (!showDoneCb.checked) {
-    // Hide table row immediately (desktop — no animation needed)
-    if (row) row.style.display = 'none';
-    if (tnr) tnr.style.display = 'none';
-    recolorRows();
-    updateGroupCounts();
+    // Hide table row immediately (desktop), anchored so content doesn't jump.
+    withScrollAnchor('.tasks-table tbody .task-row', id, () => {
+      if (row) row.style.display = 'none';
+      if (tnr) tnr.style.display = 'none';
+      recolorRows();
+      updateGroupCounts();
+    });
     if (card && animate) {
       collapseCard(card, cnr, finalize);
     } else {
@@ -1051,42 +1085,44 @@ function cardSortKey(due, pri) {
 }
 
 function insertNextRecurrence(t) {
-  // Table side: append then re-sort into place (scroll preserved).
+  // Table side: append then re-sort into place, anchored so the viewport
+  // doesn't jump when the re-sort reflows rows/headers above it.
   const tbody = document.querySelector('.tasks-table tbody');
   if (tbody) {
-    const row  = createTaskRow(t);
-    const note = createNoteRow(t, 'table');
-    tbody.appendChild(row);
-    tbody.appendChild(note);
-    wirePrimaryCb(row.querySelector('.primary-cb'));
-    wireSelCb(row.querySelector('.sel-cb'));
-    row.querySelectorAll('.ecell').forEach(wireEcell);
-    wireNoteBtn(row.querySelector('.note-btn'));
-    const page = document.querySelector('.page');
-    const top = page ? page.scrollTop : 0;
-    sortTable();
-    if (page) page.scrollTop = top;
+    withScrollAnchor('.tasks-table tbody .task-row', t.id, () => {
+      const row  = createTaskRow(t);
+      const note = createNoteRow(t, 'table');
+      tbody.appendChild(row);
+      tbody.appendChild(note);
+      wirePrimaryCb(row.querySelector('.primary-cb'));
+      wireSelCb(row.querySelector('.sel-cb'));
+      row.querySelectorAll('.ecell').forEach(wireEcell);
+      wireNoteBtn(row.querySelector('.note-btn'));
+      sortTable();
+    });
   }
 
-  // Card side: insert in sorted position, then rebuild group headers.
+  // Card side: insert in sorted position, then rebuild group headers (anchored).
   const cardList = document.getElementById('card-list');
   if (cardList) {
-    const card  = createTaskCard(t);
-    const cnote = createNoteRow(t, 'card');
-    const nk = cardSortKey(t.due, t.priority);
-    let ref = null;
-    for (const c of cardList.querySelectorAll('.task-card')) {
-      if (c.dataset.complete === 'true') { ref = c; break; }
-      const ck = cardSortKey(c.dataset.due, c.dataset.pri);
-      if (ck.due > nk.due || (ck.due === nk.due && ck.pri > nk.pri)) { ref = c; break; }
-    }
-    cardList.insertBefore(card, ref);
-    cardList.insertBefore(cnote, ref);
-    wireCardCb(card.querySelector('.card-cb'));
-    card.querySelectorAll('.ecell').forEach(wireEcell);
-    wireNoteBtn(card.querySelector('.card-note-btn'));
-    wireCardSwipe(card);
-    buildCardGroups();
+    withScrollAnchor('#card-list .task-card', t.id, () => {
+      const card  = createTaskCard(t);
+      const cnote = createNoteRow(t, 'card');
+      const nk = cardSortKey(t.due, t.priority);
+      let ref = null;
+      for (const c of cardList.querySelectorAll('.task-card')) {
+        if (c.dataset.complete === 'true') { ref = c; break; }
+        const ck = cardSortKey(c.dataset.due, c.dataset.pri);
+        if (ck.due > nk.due || (ck.due === nk.due && ck.pri > nk.pri)) { ref = c; break; }
+      }
+      cardList.insertBefore(card, ref);
+      cardList.insertBefore(cnote, ref);
+      wireCardCb(card.querySelector('.card-cb'));
+      card.querySelectorAll('.ecell').forEach(wireEcell);
+      wireNoteBtn(card.querySelector('.card-note-btn'));
+      wireCardSwipe(card);
+      buildCardGroups();
+    });
   }
 }
 
