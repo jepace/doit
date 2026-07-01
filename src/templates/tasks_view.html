@@ -849,13 +849,91 @@ document.querySelectorAll('.filter-bar select[data-filter]').forEach(sel => {
   });
 });
 
+// Smoothly collapse a card (and its open note row) then run a callback.
+// Used instead of instant display:none to avoid layout jumps.
+function collapseCard(card, cnr, done) {
+  const DURATION = 240;
+  function collapseEl(el) {
+    if (!el) return;
+    el.style.overflow = 'hidden';
+    el.style.transition = `max-height ${DURATION}ms ease, opacity ${DURATION * 0.7}ms ease`;
+    el.style.maxHeight  = el.scrollHeight + 'px';
+  }
+  collapseEl(card);
+  if (cnr && cnr.classList.contains('open')) collapseEl(cnr);
+
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (card) { card.style.maxHeight = '0'; card.style.opacity = '0'; }
+    if (cnr)  { cnr.style.maxHeight  = '0'; cnr.style.opacity  = '0'; }
+  }));
+
+  setTimeout(() => {
+    [card, cnr].forEach(el => {
+      if (!el) return;
+      el.style.display    = 'none';
+      el.style.maxHeight  = '';
+      el.style.opacity    = '';
+      el.style.transition = '';
+      el.style.overflow   = '';
+    });
+    if (done) done();
+  }, DURATION + 20);
+}
+
+// Shared post-completion DOM update. Called after the API confirms done.
+// animate=true: collapse card smoothly (checkbox path).
+// animate=false: card is already off-screen (swipe path), just hide & rebuild.
+async function applyCompletion(id, animate) {
+  const row  = document.querySelector(`.task-row[data-id="${id}"]`);
+  const card = document.querySelector(`.task-card[data-id="${id}"]`);
+  const cb   = document.querySelector(`.primary-cb[data-id="${id}"]`);
+  const cardCb = document.querySelector(`.card-cb[data-id="${id}"]`);
+
+  row?.classList.remove('completing');
+  card?.classList.remove('completing');
+
+  const data = await apiUpdate(id, 'complete', 'true');
+  if (!data || !data.ok) {
+    if (cb)     cb.checked = false;
+    if (cardCb) cardCb.checked = false;
+    // Swipe path: snap card-inner back
+    const inner = card?.querySelector('.card-inner');
+    if (inner && !animate) { inner.style.transition = 'transform .25s ease'; inner.style.transform = ''; }
+    alert('Could not mark this task done — please try again.');
+    return;
+  }
+
+  row?.classList.add('completed');
+  card?.classList.add('completed');
+
+  const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
+  const cnr = document.querySelector(`.card-note-row[data-id="${id}"]`);
+
+  // Always hide table row immediately (desktop)
+  if (row) row.style.display = 'none';
+  if (tnr) tnr.style.display = 'none';
+
+  if (!showDoneCb.checked) {
+    if (card && animate) {
+      collapseCard(card, cnr, () => { buildCardGroups(); if (data.next_task) reloadPage(); });
+    } else {
+      if (card) card.style.display = 'none';
+      if (cnr)  cnr.style.display  = 'none';
+      buildCardGroups();
+      if (data.next_task) reloadPage();
+    }
+  } else {
+    buildCardGroups();
+    if (data.next_task) reloadPage();
+  }
+}
+
 // ── Done checkbox (table) ────────────────────────────────────
 document.querySelectorAll('.primary-cb').forEach(cb => {
-  cb.addEventListener('change', async (e) => {
+  cb.addEventListener('change', (e) => {
     const id = cb.dataset.id;
-    const row = document.querySelector(`.task-row[data-id="${id}"]`);
+    const row  = document.querySelector(`.task-row[data-id="${id}"]`);
     const card = document.querySelector(`.task-card[data-id="${id}"]`);
-    // Sync card checkbox
     const cardCb = document.querySelector(`.card-cb[data-id="${id}"]`);
     if (cardCb) cardCb.checked = cb.checked;
 
@@ -863,30 +941,9 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       row?.classList.add('completing');
       card?.classList.add('completing');
       if (completionTimeouts[id]) clearTimeout(completionTimeouts[id]);
-      completionTimeouts[id] = setTimeout(async () => {
+      completionTimeouts[id] = setTimeout(() => {
         delete completionTimeouts[id];
-        const data = await apiUpdate(id, 'complete', 'true');
-        row?.classList.remove('completing');
-        card?.classList.remove('completing');
-        if (!data || !data.ok) {
-          // Server didn't save it — revert the checkbox so it's not a phantom done.
-          cb.checked = false;
-          if (cardCb) cardCb.checked = false;
-          alert('Could not mark this task done — please try again.');
-          return;
-        }
-        row?.classList.add('completed');
-        card?.classList.add('completed');
-        if (!showDoneCb.checked) {
-          if (row) row.style.display = 'none';
-          if (card) card.style.display = 'none';
-          const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
-          const cnr = document.querySelector(`.card-note-row[data-id="${id}"]`);
-          if (tnr) tnr.style.display = 'none';
-          if (cnr) cnr.style.display = 'none';
-        }
-        buildCardGroups();  // refresh mobile group counts now this card is hidden
-        if (data.next_task) setTimeout(() => reloadPage(), 800);
+        applyCompletion(id, true);
       }, 2000);
     } else {
       if (completionTimeouts[id]) {
@@ -898,8 +955,8 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       }
       row?.classList.remove('completed');
       card?.classList.remove('completed');
-      await apiUpdate(id, 'complete', 'false');
-      buildCardGroups();  // refresh mobile group counts now this card is visible again
+      apiUpdate(id, 'complete', 'false');
+      buildCardGroups();
     }
   });
 });
@@ -908,10 +965,7 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
 document.querySelectorAll('.card-cb').forEach(cb => {
   cb.addEventListener('change', () => {
     const primary = document.querySelector(`.primary-cb[data-id="${cb.dataset.id}"]`);
-    if (primary) {
-      primary.checked = cb.checked;
-      primary.dispatchEvent(new Event('change'));
-    }
+    if (primary) { primary.checked = cb.checked; primary.dispatchEvent(new Event('change')); }
   });
 });
 
@@ -1354,11 +1408,14 @@ function applyDueStyling(el, due) {
 }
 
 function buildCardGroups() {
+  const page = document.querySelector('.page');
+  const savedTop = page ? page.scrollTop : 0;
+
   // Remove existing card group headers
   document.querySelectorAll('.card-group-hdr').forEach(h => h.remove());
 
   const cardList = document.getElementById('card-list');
-  if (!cardList) return;
+  if (!cardList) { if (page) page.scrollTop = savedTop; return; }
 
   // Apply due date styling and collect cards
   const cards = [...cardList.querySelectorAll('.task-card')];
@@ -1396,6 +1453,9 @@ function buildCardGroups() {
     const label = hdr.dataset.grplabel;
     hdr.querySelector('.card-group-count').textContent = groupCounts[label] || '';
   });
+
+  // Restore scroll after DOM mutations to prevent jumps
+  if (page) page.scrollTop = savedTop;
 }
 
 buildCardGroups();
@@ -1658,16 +1718,17 @@ async function apiUpdate(id, field, value) {
       if (!active) return;
       active = false;
       if (dx <= -DONE_AT) {
-        // Full left-swipe: animate off screen then trigger done
+        // Full left-swipe: animate off screen then complete immediately (no grace period)
         inner.style.transition = 'transform .2s ease';
         inner.style.transform = 'translateX(-110vw)';
+        const primary = document.querySelector(`.primary-cb[data-id="${card.dataset.id}"]`);
+        const cardCb  = document.querySelector(`.card-cb[data-id="${card.dataset.id}"]`);
+        if (primary) primary.checked = true;
+        if (cardCb)  cardCb.checked  = true;
         setTimeout(() => {
-          const primary = document.querySelector(`.primary-cb[data-id="${card.dataset.id}"]`);
-          if (primary && !primary.checked) {
-            primary.checked = true;
-            primary.dispatchEvent(new Event('change'));
-          }
-          snapBack(inner, false);
+          inner.style.transform = '';
+          inner.style.transition = '';
+          applyCompletion(card.dataset.id, false);
         }, 220);
       } else if (dx < 0) {
         snapBack(inner);
@@ -1687,7 +1748,12 @@ async function apiUpdate(id, field, value) {
     btn.addEventListener('click', () => {
       const id = btn.dataset.id;
       const primary = document.querySelector(`.primary-cb[data-id="${id}"]`);
-      if (primary && !primary.checked) { primary.checked = true; primary.dispatchEvent(new Event('change')); }
+      const cardCb  = document.querySelector(`.card-cb[data-id="${id}"]`);
+      if (primary && !primary.checked) {
+        primary.checked = true;
+        if (cardCb) cardCb.checked = true;
+        applyCompletion(id, false);
+      }
     });
   });
   document.querySelectorAll('#card-list .swipe-delete-btn').forEach(btn => {
