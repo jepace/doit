@@ -912,19 +912,21 @@ async function applyCompletion(id, animate) {
   // Always hide table row immediately (desktop)
   if (row) row.style.display = 'none';
   if (tnr) tnr.style.display = 'none';
+  if (!showDoneCb.checked) { recolorRows(); updateGroupCounts(); }
 
+  // Note: for recurring tasks the server already created the next occurrence
+  // (saved to file, future due date). We do NOT reload to show it — reloading
+  // causes a jarring jump. It'll appear naturally on the next page load.
   if (!showDoneCb.checked) {
     if (card && animate) {
-      collapseCard(card, cnr, () => { buildCardGroups(); if (data.next_task) reloadPage(); });
+      collapseCard(card, cnr, () => buildCardGroups());
     } else {
       if (card) card.style.display = 'none';
       if (cnr)  cnr.style.display  = 'none';
       buildCardGroups();
-      if (data.next_task) reloadPage();
     }
   } else {
     buildCardGroups();
-    if (data.next_task) reloadPage();
   }
 }
 
@@ -956,6 +958,8 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       row?.classList.remove('completed');
       card?.classList.remove('completed');
       apiUpdate(id, 'complete', 'false');
+      recolorRows();
+      updateGroupCounts();
       buildCardGroups();
     }
   });
@@ -1385,6 +1389,8 @@ function updateGroupCounts() {
     }
     const span = hdr.querySelector('.grp-count');
     if (span) span.textContent = count ? `(${count})` : '';
+    // Hide a header whose group has become empty (e.g. after delete/complete)
+    hdr.style.display = count ? '' : 'none';
   });
 }
 
@@ -1599,9 +1605,44 @@ document.getElementById('mf-task').addEventListener('keydown', e => {
 document.getElementById('mob-add-overlay').addEventListener('click', closeMobAdd);
 
 // ── Delete task ──────────────────────────────────────────────
+// Removes the row/card in place (collapse animation) instead of reloading,
+// so the list doesn't jump. Falls back to a reload only on conflict/error.
 async function deleteTask(id) {
   if (!confirm('Delete this task?')) return;
-  await apiBulk('delete', [id], '');
+
+  const task_hashes = collectBulkHashes([id]);
+  const r = await fetch('/tasks/bulk-update', {
+    method:'POST', headers:{'Content-Type':'application/json','X-CSRF-Token':csrfToken},
+    body: JSON.stringify({action:'delete', task_ids:[id], value:'', task_hashes})
+  });
+  if (!r.ok) {
+    alert('This task changed in another tab. Refreshing.');
+    reloadPage();
+    return;
+  }
+
+  const row  = document.querySelector(`.task-row[data-id="${id}"]`);
+  const tnr  = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
+  const card = document.querySelector(`.task-card[data-id="${id}"]`);
+  const cnr  = document.querySelector(`.card-note-row[data-id="${id}"]`);
+
+  // Table side: remove immediately
+  row?.remove();
+  tnr?.remove();
+  recolorRows();
+  updateGroupCounts();
+
+  // Card side: animate out then remove
+  if (card) {
+    collapseCard(card, cnr, () => {
+      card.remove();
+      cnr?.remove();
+      buildCardGroups();
+    });
+  } else {
+    cnr?.remove();
+    buildCardGroups();
+  }
 }
 
 // ── API helper ───────────────────────────────────────────────
