@@ -954,8 +954,7 @@ async function applyCompletion(id, animate) {
     withScrollAnchor('.tasks-table tbody .task-row', id, () => {
       if (row) row.style.display = 'none';
       if (tnr) tnr.style.display = 'none';
-      recolorRows();
-      updateGroupCounts();
+      syncTableGroups();  // drop an emptied group header cleanly, no flash
     });
     if (card && animate) {
       collapseCard(card, cnr, finalize);
@@ -1092,13 +1091,11 @@ function insertNextRecurrence(t) {
     withScrollAnchor('.tasks-table tbody .task-row', t.id, () => {
       const row  = createTaskRow(t);
       const note = createNoteRow(t, 'table');
-      tbody.appendChild(row);
-      tbody.appendChild(note);
       wirePrimaryCb(row.querySelector('.primary-cb'));
       wireSelCb(row.querySelector('.sel-cb'));
       row.querySelectorAll('.ecell').forEach(wireEcell);
       wireNoteBtn(row.querySelector('.note-btn'));
-      sortTable();
+      insertRowSorted(row, note);  // surgical insert — no full re-sort, no header flash
     });
   }
 
@@ -1154,8 +1151,7 @@ function wirePrimaryCb(cb) {
       row?.classList.remove('completed');
       card?.classList.remove('completed');
       apiUpdate(id, 'complete', 'false');
-      recolorRows();
-      updateGroupCounts();
+      syncTableGroups();
       buildCardGroups();
     }
   });
@@ -1486,6 +1482,122 @@ function removeGroupHeaders() {
   document.querySelectorAll('.group-header-row').forEach(r => r.remove());
 }
 
+// Module-level header factory (used by both sortTable and syncTableGroups).
+// Stores the label in data-grplabel so headers can be diffed/matched, and
+// wires its select-all checkbox on creation.
+function makeGroupHeaderEl(cls, label) {
+  const tr = document.createElement('tr');
+  tr.className = `group-header-row ${cls}`;
+  tr.dataset.grplabel = label;
+  tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
+  tr.querySelector('.grp-select-all').addEventListener('change', function () {
+    let node = this.closest('tr').nextElementSibling;
+    while (node && !node.classList.contains('group-header-row')) {
+      const sel = node.querySelector('.sel-cb');
+      if (sel) sel.checked = this.checked;
+      node = node.nextElementSibling;
+    }
+    updateBulkBtn();
+  });
+  return tr;
+}
+
+// The group a row belongs to under the current sort, or null if this sort
+// isn't grouped. Mirrors the grouping in sortTable().
+function groupForRow(row) {
+  if (sortCol === 'due' && sortDir === 'asc') {
+    const due = row.querySelector('.ecell[data-field="due"]')?.textContent.trim() || '—';
+    return dateGroup(due);
+  }
+  if (sortCol === 'priority') {
+    const PRI_LABELS = {0:'⬆ Top', 1:'↑ High', 2:'· Medium', 3:'↓ Low', 4:'No Priority'};
+    const PRI_CLS    = {0:'grp-pri-top', 1:'grp-pri-high', 2:'grp-pri-medium', 3:'grp-pri-low', 4:'grp-pri-none'};
+    const v = colVal(row, 'priority');
+    return {label: PRI_LABELS[v] || 'No Priority', cls: PRI_CLS[v] || 'grp-pri-none'};
+  }
+  if (sortCol === 'context') {
+    const v = colVal(row, 'context');
+    const label = v === '￿' ? 'No Context' : v.charAt(0).toUpperCase() + v.slice(1);
+    const cls   = v === '￿' ? 'grp-ctx-none' : 'grp-ctx';
+    return {label, cls};
+  }
+  return null;
+}
+
+// Comparator identical to sortTable()'s, for finding an insertion point.
+function compareRows(a, b) {
+  const av = colVal(a, sortCol), bv = colVal(b, sortCol);
+  if (av < bv) return sortDir === 'asc' ? -1 : 1;
+  if (av > bv) return sortDir === 'asc' ?  1 : -1;
+  for (const {col, dir} of getSortLevels()) {
+    if (col === sortCol) continue;
+    const xv = colVal(a, col), yv = colVal(b, col);
+    if (xv < yv) return dir === 'asc' ? -1 : 1;
+    if (xv > yv) return dir === 'asc' ?  1 : -1;
+  }
+  if (sortCol === 'due')      return colVal(a,'priority') - colVal(b,'priority');
+  if (sortCol === 'priority') {
+    const adv = colVal(a,'due'), bdv = colVal(b,'due');
+    return adv < bdv ? -1 : adv > bdv ? 1 : 0;
+  }
+  return colVal(a,'description').localeCompare(colVal(b,'description'));
+}
+
+// Diff-based header reconciliation — adds/moves/removes only headers that
+// actually changed, leaving the rest (and the scroll position) untouched.
+// This is the flash-free alternative to sortTable()'s full rebuild.
+function syncTableGroups() {
+  const tbody = document.querySelector('.tasks-table tbody');
+  if (!tbody) return;
+  const grouped = (sortCol === 'due' && sortDir === 'asc') || sortCol === 'priority' || sortCol === 'context';
+  if (!grouped) { removeGroupHeaders(); recolorRows(); return; }
+
+  // Which headers are needed, and before which row, in document order.
+  const needed = [];
+  let lastLabel = null;
+  for (const row of tbody.querySelectorAll('.task-row')) {
+    if (row.classList.contains('filtered-out') || row.style.display === 'none') continue;
+    if (sortCol === 'due' && sortDir === 'asc' && row.classList.contains('completed')) continue;
+    const g = groupForRow(row);
+    if (!g) continue;
+    if (g.label !== lastLabel) { needed.push({label: g.label, cls: g.cls, beforeRow: row}); lastLabel = g.label; }
+  }
+
+  const existing = {};
+  tbody.querySelectorAll('.group-header-row').forEach(h => { existing[h.dataset.grplabel] = h; });
+
+  // Remove headers no longer needed
+  Object.keys(existing).forEach(lbl => {
+    if (!needed.some(n => n.label === lbl)) { existing[lbl].remove(); delete existing[lbl]; }
+  });
+
+  // Insert or reposition — only touch the DOM when placement is wrong
+  needed.forEach(({label, cls, beforeRow}) => {
+    let hdr = existing[label];
+    if (!hdr) hdr = makeGroupHeaderEl(cls, label);
+    else hdr.className = `group-header-row ${cls}`;
+    if (hdr.nextElementSibling !== beforeRow) tbody.insertBefore(hdr, beforeRow);
+  });
+
+  recolorRows();
+  updateGroupCounts();
+}
+
+// Insert an already-built row (+ its note row) into its sorted position
+// without re-sorting or rebuilding the whole table. Headers reconciled by diff.
+function insertRowSorted(row, note) {
+  const tbody = document.querySelector('.tasks-table tbody');
+  if (!tbody) return;
+  let ref = null;
+  for (const r of tbody.querySelectorAll('.task-row')) {
+    if (r.style.display === 'none' || r.classList.contains('filtered-out')) continue;
+    if (compareRows(row, r) < 0) { ref = r; break; }
+  }
+  if (ref) { tbody.insertBefore(row, ref); tbody.insertBefore(note, ref); }
+  else     { tbody.appendChild(row);       tbody.appendChild(note); }
+  syncTableGroups();
+}
+
 function sortTable() {
   const tbody = document.querySelector('.tasks-table tbody');
   if (!tbody) return;
@@ -1518,12 +1630,7 @@ function sortTable() {
 
   pairs.forEach(({row,note}) => { tbody.appendChild(row); if (note) tbody.appendChild(note); });
 
-  function makeGroupHeader(cls, label) {
-    const tr = document.createElement('tr');
-    tr.className = `group-header-row ${cls}`;
-    tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
-    return tr;
-  }
+  const makeGroupHeader = makeGroupHeaderEl;
 
   if (sortCol === 'due' && sortDir === 'asc') {
     let lastKey = null;
@@ -1561,18 +1668,6 @@ function sortTable() {
       }
     }
   }
-
-  document.querySelectorAll('.grp-select-all').forEach(cb => {
-    cb.addEventListener('change', () => {
-      let node = cb.closest('tr').nextElementSibling;
-      while (node && !node.classList.contains('group-header-row')) {
-        const sel = node.querySelector('.sel-cb');
-        if (sel) { sel.checked = cb.checked; }
-        node = node.nextElementSibling;
-      }
-      updateBulkBtn();
-    });
-  });
 
   recolorRows();
   updateGroupCounts();
@@ -1825,11 +1920,12 @@ async function deleteTask(id) {
   const card = document.querySelector(`.task-card[data-id="${id}"]`);
   const cnr  = document.querySelector(`.card-note-row[data-id="${id}"]`);
 
-  // Table side: remove immediately
-  row?.remove();
-  tnr?.remove();
-  recolorRows();
-  updateGroupCounts();
+  // Table side: remove immediately (anchored, flash-free header reconcile)
+  withScrollAnchor('.tasks-table tbody .task-row', id, () => {
+    row?.remove();
+    tnr?.remove();
+    syncTableGroups();
+  });
 
   // Card side: animate out then remove
   if (card) {
