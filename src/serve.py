@@ -697,11 +697,15 @@ def tasks_update():
     result = {"ok": True, "new_hash": task.content_hash}
     if next_task:
         result["next_task"] = {
-            "description": next_task.description,
-            "due":         next_task.due,
-            "priority":    next_task.priority,
-            "context":     next_task.context,
-            "recurrence":  next_task.recurrence,
+            "id":           next_task.id,
+            "content_hash": next_task.content_hash,
+            "description":  next_task.description,
+            "due":          next_task.due,
+            "priority":     next_task.priority,
+            "context":      next_task.context,
+            "recurrence":   next_task.recurrence,
+            "start":        next_task.start,
+            "notes":        next_task.notes,
         }
     return result
 

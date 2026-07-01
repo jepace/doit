@@ -908,30 +908,190 @@ async function applyCompletion(id, animate) {
 
   const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
   const cnr = document.querySelector(`.card-note-row[data-id="${id}"]`);
+  const nt  = data.next_task;  // recurring task → next occurrence to insert
 
-  // Always hide table row immediately (desktop)
-  if (row) row.style.display = 'none';
-  if (tnr) tnr.style.display = 'none';
-  if (!showDoneCb.checked) { recolorRows(); updateGroupCounts(); }
+  // finalize(): after the completed task is out of view, insert the next
+  // recurrence (if any) in its sorted position and refresh groups — no reload.
+  const finalize = () => {
+    if (nt) insertNextRecurrence(nt);
+    else    buildCardGroups();
+  };
 
-  // Note: for recurring tasks the server already created the next occurrence
-  // (saved to file, future due date). We do NOT reload to show it — reloading
-  // causes a jarring jump. It'll appear naturally on the next page load.
   if (!showDoneCb.checked) {
+    // Hide table row immediately (desktop — no animation needed)
+    if (row) row.style.display = 'none';
+    if (tnr) tnr.style.display = 'none';
+    recolorRows();
+    updateGroupCounts();
     if (card && animate) {
-      collapseCard(card, cnr, () => buildCardGroups());
+      collapseCard(card, cnr, finalize);
     } else {
       if (card) card.style.display = 'none';
       if (cnr)  cnr.style.display  = 'none';
-      buildCardGroups();
+      finalize();
     }
   } else {
+    // Show-completed is on: keep the completed row/card visible, just restyle.
+    finalize();
+  }
+}
+
+// ── Dynamic insertion of a recurring task's next occurrence ──────
+// Builds a fully-wired table row + mobile card for the new occurrence and
+// drops it into its sorted position, so recurring completions don't reload.
+function priClass(p) { return p ? `pri-${p}` : 'pri-none'; }
+
+function createTaskRow(t) {
+  const id = t.id;
+  const tr = document.createElement('tr');
+  tr.className = `task-row ${priClass(t.priority)}`;
+  tr.dataset.id = id; tr.dataset.hash = t.content_hash; tr.dataset.done = '';
+  tr.dataset.ctx = t.context || ''; tr.dataset.pri = t.priority || ''; tr.dataset.due = t.due || '';
+  tr.innerHTML =
+    `<td><input type="checkbox" class="done-cb primary-cb" autocomplete="off"></td>`
+    + `<td><span class="ecell task-name-text" data-field="description"></span></td>`
+    + `<td><span class="ecell" data-field="context"></span></td>`
+    + `<td><span class="ecell" data-field="due"></span></td>`
+    + `<td><span class="ecell" data-field="recurrence"></span></td>`
+    + `<td><span class="ecell" data-field="priority"></span></td>`
+    + `<td><span class="ecell" data-field="start"></span></td>`
+    + `<td style="display:flex; gap:4px; justify-content:center; align-items:center;">`
+    +   `<button class="note-btn">+</button>`
+    +   `<button class="delete-btn" title="Delete" style="color:var(--danger); opacity:.6;">✕</button>`
+    + `</td>`
+    + `<td><input type="checkbox" class="sel-cb" autocomplete="off"></td>`;
+  tr.querySelectorAll('.primary-cb, .sel-cb, .ecell, .note-btn').forEach(el => el.dataset.id = id);
+  const setCell = (field, val, disp) => {
+    const s = tr.querySelector(`.ecell[data-field="${field}"]`);
+    s.textContent = disp || '—';
+    if (!val) s.classList.add('empty');
+  };
+  setCell('description', t.description, t.description);
+  setCell('context', t.context, t.context);
+  setCell('due', t.due, t.due);
+  setCell('recurrence', t.recurrence, t.recurrence);
+  setCell('priority', t.priority, t.priority ? t.priority.charAt(0).toUpperCase() + t.priority.slice(1) : '');
+  setCell('start', t.start, t.start);
+  const nb = tr.querySelector('.note-btn');
+  if ((t.notes || '').trim()) { nb.textContent = '📝'; nb.classList.add('has-note'); }
+  tr.querySelector('.delete-btn').setAttribute('onclick', `deleteTask('${id}')`);
+  return tr;
+}
+
+function createNoteRow(t, cls) {
+  const id = t.id;
+  const el = document.createElement(cls === 'card' ? 'div' : 'tr');
+  if (cls === 'card') {
+    el.className = 'card-note-row'; el.dataset.id = id;
+    el.innerHTML = `<textarea class="note-textarea" placeholder="Notes…"></textarea>`
+      + `<div class="note-actions"><button>Save</button><button>Cancel</button></div>`;
+  } else {
+    el.className = 'note-row'; el.dataset.id = id;
+    el.innerHTML = `<td colspan="9"><textarea class="note-textarea" placeholder="Notes…"></textarea>`
+      + `<div class="note-actions"><button>Save</button><button>Cancel</button></div></td>`;
+  }
+  const ta = el.querySelector('.note-textarea');
+  ta.dataset.id = id; ta.value = t.notes || '';
+  const [saveB, cancelB] = el.querySelectorAll('.note-actions button');
+  saveB.setAttribute('onclick', `saveNote('${id}')`);
+  cancelB.setAttribute('onclick', `closeNote('${id}')`);
+  return el;
+}
+
+function createTaskCard(t) {
+  const id = t.id;
+  const card = document.createElement('div');
+  card.className = `task-card ${priClass(t.priority)}`;
+  card.dataset.id = id; card.dataset.hash = t.content_hash; card.dataset.due = t.due || '';
+  card.dataset.ctx = t.context || ''; card.dataset.pri = t.priority || ''; card.dataset.complete = 'false';
+  card.innerHTML =
+    `<div class="card-bg-left">`
+    +   `<button class="swipe-btn swipe-note-btn">📝<span>Note</span></button>`
+    +   `<button class="swipe-btn swipe-delete-btn">🗑<span>Delete</span></button>`
+    + `</div>`
+    + `<div class="card-bg-right">`
+    +   `<button class="swipe-btn swipe-done-btn">✓<span>Done</span></button>`
+    + `</div>`
+    + `<div class="card-inner">`
+    +   `<div class="card-cb-wrap"><input type="checkbox" class="card-cb" autocomplete="off"></div>`
+    +   `<div class="card-main">`
+    +     `<div class="card-title ecell task-name-text" data-field="description"></div>`
+    +     `<div class="card-meta"><span class="card-due ecell" data-field="due"></span></div>`
+    +   `</div>`
+    +   `<div class="card-right"><button class="card-note-btn">＋</button></div>`
+    + `</div>`;
+  card.querySelectorAll('.swipe-note-btn, .swipe-delete-btn, .swipe-done-btn, .card-cb, .ecell, .card-note-btn')
+      .forEach(el => el.dataset.id = id);
+  const title = card.querySelector('.card-title');
+  title.textContent = t.description || '—';
+  if (!t.description) title.classList.add('empty');
+  const dueEl = card.querySelector('.card-due');
+  dueEl.textContent = t.due || '—';
+  if (!t.due) dueEl.classList.add('empty');
+  applyDueStyling(dueEl, t.due);
+  const meta = card.querySelector('.card-meta');
+  if (t.context) {
+    const c = document.createElement('span');
+    c.className = 'card-ctx ecell'; c.dataset.id = id; c.dataset.field = 'context';
+    c.textContent = t.context; meta.appendChild(c);
+  }
+  if (t.recurrence) {
+    const r = document.createElement('span');
+    r.className = 'card-rec'; r.title = t.recurrence; r.textContent = '🔁'; meta.appendChild(r);
+  }
+  const nb = card.querySelector('.card-note-btn');
+  if ((t.notes || '').trim()) { nb.textContent = '📝'; nb.classList.add('has-note'); }
+  return card;
+}
+
+// Sort key mirroring the server's default order: due ascending (no-due last),
+// priority as tiebreak.
+function cardSortKey(due, pri) {
+  return { due: due || '￿', pri: PRIORITY_ORDER[pri] ?? 4 };
+}
+
+function insertNextRecurrence(t) {
+  // Table side: append then re-sort into place (scroll preserved).
+  const tbody = document.querySelector('.tasks-table tbody');
+  if (tbody) {
+    const row  = createTaskRow(t);
+    const note = createNoteRow(t, 'table');
+    tbody.appendChild(row);
+    tbody.appendChild(note);
+    wirePrimaryCb(row.querySelector('.primary-cb'));
+    wireSelCb(row.querySelector('.sel-cb'));
+    row.querySelectorAll('.ecell').forEach(wireEcell);
+    wireNoteBtn(row.querySelector('.note-btn'));
+    const page = document.querySelector('.page');
+    const top = page ? page.scrollTop : 0;
+    sortTable();
+    if (page) page.scrollTop = top;
+  }
+
+  // Card side: insert in sorted position, then rebuild group headers.
+  const cardList = document.getElementById('card-list');
+  if (cardList) {
+    const card  = createTaskCard(t);
+    const cnote = createNoteRow(t, 'card');
+    const nk = cardSortKey(t.due, t.priority);
+    let ref = null;
+    for (const c of cardList.querySelectorAll('.task-card')) {
+      if (c.dataset.complete === 'true') { ref = c; break; }
+      const ck = cardSortKey(c.dataset.due, c.dataset.pri);
+      if (ck.due > nk.due || (ck.due === nk.due && ck.pri > nk.pri)) { ref = c; break; }
+    }
+    cardList.insertBefore(card, ref);
+    cardList.insertBefore(cnote, ref);
+    wireCardCb(card.querySelector('.card-cb'));
+    card.querySelectorAll('.ecell').forEach(wireEcell);
+    wireNoteBtn(card.querySelector('.card-note-btn'));
+    wireCardSwipe(card);
     buildCardGroups();
   }
 }
 
 // ── Done checkbox (table) ────────────────────────────────────
-document.querySelectorAll('.primary-cb').forEach(cb => {
+function wirePrimaryCb(cb) {
   cb.addEventListener('change', (e) => {
     const id = cb.dataset.id;
     const row  = document.querySelector(`.task-row[data-id="${id}"]`);
@@ -963,15 +1123,17 @@ document.querySelectorAll('.primary-cb').forEach(cb => {
       buildCardGroups();
     }
   });
-});
+}
+document.querySelectorAll('.primary-cb').forEach(wirePrimaryCb);
 
 // Card checkboxes proxy to primary-cb
-document.querySelectorAll('.card-cb').forEach(cb => {
+function wireCardCb(cb) {
   cb.addEventListener('change', () => {
     const primary = document.querySelector(`.primary-cb[data-id="${cb.dataset.id}"]`);
     if (primary) { primary.checked = cb.checked; primary.dispatchEvent(new Event('change')); }
   });
-});
+}
+document.querySelectorAll('.card-cb').forEach(wireCardCb);
 
 // ── Inline editing — DOM swap approach ──────────────────────
 const REPEAT_MAP = {
@@ -1067,12 +1229,13 @@ function makeEditable(span) {
   }
 }
 
-document.querySelectorAll('.ecell').forEach(span => {
+function wireEcell(span) {
   span.addEventListener('click', () => makeEditable(span));
-});
+}
+document.querySelectorAll('.ecell').forEach(wireEcell);
 
 // ── Notes ────────────────────────────────────────────────────
-document.querySelectorAll('.note-btn, .card-note-btn').forEach(btn => {
+function wireNoteBtn(btn) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     const id = btn.dataset.id;
@@ -1090,7 +1253,8 @@ document.querySelectorAll('.note-btn, .card-note-btn').forEach(btn => {
       if (cnr.classList.contains('open')) cnr.querySelector('.note-textarea')?.focus();
     }
   });
-});
+}
+document.querySelectorAll('.note-btn, .card-note-btn').forEach(wireNoteBtn);
 
 function closeNote(id) {
   const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
@@ -1130,9 +1294,8 @@ const bulkDrop = document.getElementById('bulk-drop');
 function updateBulkBtn() {
   bulkBtn.style.display = document.querySelectorAll('.sel-cb:checked').length ? 'block' : 'none';
 }
-document.querySelectorAll('.sel-cb').forEach(cb => {
-  cb.addEventListener('change', updateBulkBtn);
-});
+function wireSelCb(cb) { cb.addEventListener('change', updateBulkBtn); }
+document.querySelectorAll('.sel-cb').forEach(wireSelCb);
 bulkBtn.addEventListener('click', () => bulkDrop.classList.toggle('open'));
 document.addEventListener('click', e => { if (!e.target.closest('.bulk-wrap')) bulkDrop.classList.remove('open'); });
 function collectBulkHashes(ids) {
@@ -1707,113 +1870,105 @@ async function apiUpdate(id, field, value) {
 })();
 
 // ── Card swipe gestures (mobile) ─────────────────────────────
-(function() {
-  const REVEAL_W   = 160;  // px: width of note+delete panel
-  const DONE_W     =  80;  // px: width of done panel
-  const OPEN_AT    = 100;  // px of right-swipe to latch open
-  const DONE_AT    = 110;  // px of left-swipe to auto-trigger done
-  let openInner    = null; // currently latched-open card-inner
+const SWIPE_REVEAL_W = 160;  // px: width of note+delete panel
+const SWIPE_DONE_W   =  80;  // px: width of done panel
+const SWIPE_OPEN_AT  = 100;  // px of right-swipe to latch open
+const SWIPE_DONE_AT  = 110;  // px of left-swipe to auto-trigger done
+let swipeOpenInner   = null; // currently latched-open card-inner
 
-  function snapBack(inner, animate) {
-    if (animate !== false) inner.style.transition = 'transform .25s ease';
-    inner.style.transform = '';
-    if (openInner === inner) openInner = null;
-  }
+function swipeSnapBack(inner, animate) {
+  if (animate !== false) inner.style.transition = 'transform .25s ease';
+  inner.style.transform = '';
+  if (swipeOpenInner === inner) swipeOpenInner = null;
+}
 
-  function latchOpen(inner) {
-    inner.style.transition = 'transform .25s ease';
-    inner.style.transform = `translateX(${REVEAL_W}px)`;
-    openInner = inner;
-  }
+function swipeLatchOpen(inner) {
+  inner.style.transition = 'transform .25s ease';
+  inner.style.transform = `translateX(${SWIPE_REVEAL_W}px)`;
+  swipeOpenInner = inner;
+}
 
-  // Tap outside to close latched card
-  document.addEventListener('touchstart', (e) => {
-    if (!openInner) return;
-    if (!openInner.closest('.task-card').contains(e.target)) snapBack(openInner);
+// Tap outside to close latched card
+document.addEventListener('touchstart', (e) => {
+  if (!swipeOpenInner) return;
+  if (!swipeOpenInner.closest('.task-card').contains(e.target)) swipeSnapBack(swipeOpenInner);
+}, { passive: true });
+
+// Wire swipe gestures + action buttons for a single card element.
+function wireCardSwipe(card) {
+  const inner = card.querySelector('.card-inner');
+  if (!inner) return;
+  let x0 = 0, y0 = 0, dx = 0, axis = null, active = false;
+
+  inner.addEventListener('touchstart', (e) => {
+    if (swipeOpenInner && swipeOpenInner !== inner) swipeSnapBack(swipeOpenInner);
+    x0 = e.touches[0].clientX;
+    y0 = e.touches[0].clientY;
+    dx = 0; axis = null; active = true;
+    inner.style.transition = 'none';
   }, { passive: true });
 
-  document.querySelectorAll('#card-list .task-card').forEach(card => {
-    const inner = card.querySelector('.card-inner');
-    if (!inner) return;
-    let x0 = 0, y0 = 0, dx = 0, axis = null, active = false;
-
-    inner.addEventListener('touchstart', (e) => {
-      if (openInner && openInner !== inner) snapBack(openInner);
-      x0 = e.touches[0].clientX;
-      y0 = e.touches[0].clientY;
-      dx = 0; axis = null; active = true;
-      inner.style.transition = 'none';
-    }, { passive: true });
-
-    inner.addEventListener('touchmove', (e) => {
-      if (!active) return;
-      const cx = e.touches[0].clientX, cy = e.touches[0].clientY;
-      dx = cx - x0;
-      if (!axis) {
-        const adx = Math.abs(dx), ady = Math.abs(cy - y0);
-        if (adx < 4 && ady < 4) return;
-        axis = adx >= ady ? 'h' : 'v';
-      }
-      if (axis === 'v') { active = false; return; }
-      e.preventDefault();
-      const clamped = Math.max(-(DONE_W * 2), Math.min(REVEAL_W, dx));
-      inner.style.transform = `translateX(${clamped}px)`;
-    }, { passive: false });
-
-    function onEnd() {
-      if (!active) return;
-      active = false;
-      if (dx <= -DONE_AT) {
-        // Full left-swipe: animate off screen then complete immediately (no grace period)
-        inner.style.transition = 'transform .2s ease';
-        inner.style.transform = 'translateX(-110vw)';
-        const primary = document.querySelector(`.primary-cb[data-id="${card.dataset.id}"]`);
-        const cardCb  = document.querySelector(`.card-cb[data-id="${card.dataset.id}"]`);
-        if (primary) primary.checked = true;
-        if (cardCb)  cardCb.checked  = true;
-        setTimeout(() => {
-          inner.style.transform = '';
-          inner.style.transition = '';
-          applyCompletion(card.dataset.id, false);
-        }, 220);
-      } else if (dx < 0) {
-        snapBack(inner);
-      } else if (dx >= OPEN_AT) {
-        latchOpen(inner);
-      } else {
-        snapBack(inner);
-      }
+  inner.addEventListener('touchmove', (e) => {
+    if (!active) return;
+    const cx = e.touches[0].clientX, cy = e.touches[0].clientY;
+    dx = cx - x0;
+    if (!axis) {
+      const adx = Math.abs(dx), ady = Math.abs(cy - y0);
+      if (adx < 4 && ady < 4) return;
+      axis = adx >= ady ? 'h' : 'v';
     }
+    if (axis === 'v') { active = false; return; }
+    e.preventDefault();
+    const clamped = Math.max(-(SWIPE_DONE_W * 2), Math.min(SWIPE_REVEAL_W, dx));
+    inner.style.transform = `translateX(${clamped}px)`;
+  }, { passive: false });
 
-    inner.addEventListener('touchend',   onEnd, { passive: true });
-    inner.addEventListener('touchcancel', onEnd, { passive: true });
-  });
+  function onEnd() {
+    if (!active) return;
+    active = false;
+    if (dx <= -SWIPE_DONE_AT) {
+      // Full left-swipe: animate off screen then complete immediately (no grace period)
+      inner.style.transition = 'transform .2s ease';
+      inner.style.transform = 'translateX(-110vw)';
+      const primary = document.querySelector(`.primary-cb[data-id="${card.dataset.id}"]`);
+      const cardCb  = document.querySelector(`.card-cb[data-id="${card.dataset.id}"]`);
+      if (primary) primary.checked = true;
+      if (cardCb)  cardCb.checked  = true;
+      setTimeout(() => {
+        inner.style.transform = '';
+        inner.style.transition = '';
+        applyCompletion(card.dataset.id, false);
+      }, 220);
+    } else if (dx < 0) {
+      swipeSnapBack(inner);
+    } else if (dx >= SWIPE_OPEN_AT) {
+      swipeLatchOpen(inner);
+    } else {
+      swipeSnapBack(inner);
+    }
+  }
 
-  // Swipe button actions
-  document.querySelectorAll('#card-list .swipe-done-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.id;
-      const primary = document.querySelector(`.primary-cb[data-id="${id}"]`);
-      const cardCb  = document.querySelector(`.card-cb[data-id="${id}"]`);
-      if (primary && !primary.checked) {
-        primary.checked = true;
-        if (cardCb) cardCb.checked = true;
-        applyCompletion(id, false);
-      }
-    });
+  inner.addEventListener('touchend',   onEnd, { passive: true });
+  inner.addEventListener('touchcancel', onEnd, { passive: true });
+
+  // Action buttons behind the card
+  card.querySelector('.swipe-done-btn')?.addEventListener('click', () => {
+    const id = card.dataset.id;
+    const primary = document.querySelector(`.primary-cb[data-id="${id}"]`);
+    const cardCb  = document.querySelector(`.card-cb[data-id="${id}"]`);
+    if (primary && !primary.checked) {
+      primary.checked = true;
+      if (cardCb) cardCb.checked = true;
+      applyCompletion(id, false);
+    }
   });
-  document.querySelectorAll('#card-list .swipe-delete-btn').forEach(btn => {
-    btn.addEventListener('click', () => deleteTask(btn.dataset.id));
+  card.querySelector('.swipe-delete-btn')?.addEventListener('click', () => deleteTask(card.dataset.id));
+  card.querySelector('.swipe-note-btn')?.addEventListener('click', () => {
+    swipeSnapBack(inner);
+    document.querySelector(`.card-note-btn[data-id="${card.dataset.id}"]`)?.click();
   });
-  document.querySelectorAll('#card-list .swipe-note-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.id;
-      const inner = btn.closest('.task-card')?.querySelector('.card-inner');
-      if (inner) snapBack(inner);
-      document.querySelector(`.card-note-btn[data-id="${id}"]`)?.click();
-    });
-  });
-})();
+}
+document.querySelectorAll('#card-list .task-card').forEach(wireCardSwipe);
 
 // ── Keyboard shortcuts ────────────────────────────────────────
 document.addEventListener('keydown', (e) => {
