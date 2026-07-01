@@ -1408,54 +1408,59 @@ function applyDueStyling(el, due) {
 }
 
 function buildCardGroups() {
-  const page = document.querySelector('.page');
-  const savedTop = page ? page.scrollTop : 0;
-
-  // Remove existing card group headers
-  document.querySelectorAll('.card-group-hdr').forEach(h => h.remove());
-
   const cardList = document.getElementById('card-list');
-  if (!cardList) { if (page) page.scrollTop = savedTop; return; }
+  if (!cardList) return;
 
-  // Apply due date styling and collect cards
-  const cards = [...cardList.querySelectorAll('.task-card')];
-
-  // Apply styling to due date spans
-  cards.forEach(card => {
-    const due = card.dataset.due;
+  // Apply due date styling to all cards
+  [...cardList.querySelectorAll('.task-card')].forEach(card => {
     const dueEl = card.querySelector('.card-due');
-    if (dueEl) applyDueStyling(dueEl, due);
+    if (dueEl) applyDueStyling(dueEl, card.dataset.due);
   });
 
-  // Inject group headers (cards are server-sorted by due date asc)
+  // Compute what headers are needed and where, without touching the DOM yet
+  const needed = []; // [{label, cls, beforeCard}]
   let lastGroup = null;
   const groupCounts = {};
 
-  cards.forEach(card => {
+  [...cardList.querySelectorAll('.task-card')].forEach(card => {
     if (card.dataset.complete === 'true') return;
     if (card.classList.contains('completed') && !showDoneCb.checked) return;
     if (card.classList.contains('filtered-out')) return;
-    const due = card.dataset.due;
-    const grp = dateGroup(due);
+    if (card.style.display === 'none') return;
+    const grp = dateGroup(card.dataset.due);
     groupCounts[grp.label] = (groupCounts[grp.label] || 0) + 1;
     if (grp.label !== lastGroup) {
-      const hdr = document.createElement('div');
-      hdr.className = `card-group-hdr ${grp.cls}`;
-      hdr.dataset.grplabel = grp.label;
-      hdr.innerHTML = `${grp.label} <span class="card-group-count"></span>`;
-      cardList.insertBefore(hdr, card);
+      needed.push({ label: grp.label, cls: grp.cls, beforeCard: card });
       lastGroup = grp.label;
     }
   });
 
-  // Fill counts
-  document.querySelectorAll('.card-group-hdr').forEach(hdr => {
-    const label = hdr.dataset.grplabel;
-    hdr.querySelector('.card-group-count').textContent = groupCounts[label] || '';
+  // Collect existing headers (keyed by label)
+  const existing = {};
+  cardList.querySelectorAll('.card-group-hdr').forEach(h => { existing[h.dataset.grplabel] = h; });
+
+  // Remove headers that are no longer needed
+  Object.keys(existing).forEach(label => {
+    if (!groupCounts[label]) { existing[label].remove(); delete existing[label]; }
   });
 
-  // Restore scroll after DOM mutations to prevent jumps
-  if (page) page.scrollTop = savedTop;
+  // Insert or reposition headers — only touch the DOM when placement is wrong
+  needed.forEach(({ label, cls, beforeCard }) => {
+    let hdr = existing[label];
+    if (!hdr) {
+      hdr = document.createElement('div');
+      hdr.className = `card-group-hdr ${cls}`;
+      hdr.dataset.grplabel = label;
+      hdr.innerHTML = `${label} <span class="card-group-count"></span>`;
+    } else {
+      hdr.className = `card-group-hdr ${cls}`;
+    }
+    // Only move if not already the immediate predecessor of beforeCard
+    if (hdr.nextElementSibling !== beforeCard) {
+      cardList.insertBefore(hdr, beforeCard);
+    }
+    hdr.querySelector('.card-group-count').textContent = groupCounts[label] || '';
+  });
 }
 
 buildCardGroups();
