@@ -252,6 +252,15 @@
     .card-group-hdr.grp-week     { color: #0a84ff; background: #0a84ff10; border-top-color: #0a84ff; }
     .card-group-hdr.grp-month   { color: #bf5af2; background: #bf5af210; border-top-color: #bf5af2; }
     .card-group-hdr.grp-future  { color: #32ade6; background: #32ade610; border-top-color: #32ade6; }
+    /* Priority/context groups — used when the desktop sort column is set to
+       Priority or Context; mobile cards mirror whichever grouping is active. */
+    .card-group-hdr.grp-pri-top    { color: var(--danger); background: #ff3b3010; border-top-color: var(--danger); }
+    .card-group-hdr.grp-pri-high   { color: #ff9500; background: #ff950010; border-top-color: #ff9500; }
+    .card-group-hdr.grp-pri-medium { color: #0a84ff; background: #0a84ff10; border-top-color: #0a84ff; }
+    .card-group-hdr.grp-pri-low,
+    .card-group-hdr.grp-pri-none   { color: var(--text2); background: var(--bg3); border-top-color: var(--border); }
+    .card-group-hdr.grp-ctx        { color: #32ade6; background: #32ade610; border-top-color: #32ade6; }
+    .card-group-hdr.grp-ctx-none   { color: var(--text2); background: var(--bg3); border-top-color: var(--border); }
     .card-group-count { font-size: 11px; font-weight: 600; opacity: .7; }
 
     /* Task card */
@@ -1077,12 +1086,6 @@ function createTaskCard(t) {
   return card;
 }
 
-// Sort key mirroring the server's default order: due ascending (no-due last),
-// priority as tiebreak.
-function cardSortKey(due, pri) {
-  return { due: due || '￿', pri: PRIORITY_ORDER[pri] ?? 4 };
-}
-
 function insertNextRecurrence(t) {
   // Table side: append then re-sort into place, anchored so the viewport
   // doesn't jump when the re-sort reflows rows/headers above it.
@@ -1099,21 +1102,16 @@ function insertNextRecurrence(t) {
     });
   }
 
-  // Card side: insert in sorted position, then rebuild group headers (anchored).
+  // Card side: append (position doesn't matter — buildCardGroups()'s
+  // reorderCards() places every card via the one shared comparator) then
+  // rebuild group headers (anchored).
   const cardList = document.getElementById('card-list');
   if (cardList) {
     withScrollAnchor('#card-list .task-card', t.id, () => {
       const card  = createTaskCard(t);
       const cnote = createNoteRow(t, 'card');
-      const nk = cardSortKey(t.due, t.priority);
-      let ref = null;
-      for (const c of cardList.querySelectorAll('.task-card')) {
-        if (c.dataset.complete === 'true') { ref = c; break; }
-        const ck = cardSortKey(c.dataset.due, c.dataset.pri);
-        if (ck.due > nk.due || (ck.due === nk.due && ck.pri > nk.pri)) { ref = c; break; }
-      }
-      cardList.insertBefore(card, ref);
-      cardList.insertBefore(cnote, ref);
+      cardList.appendChild(card);
+      cardList.appendChild(cnote);
       wireCardCb(card.querySelector('.card-cb'));
       card.querySelectorAll('.ecell').forEach(wireEcell);
       wireNoteBtn(card.querySelector('.card-note-btn'));
@@ -1438,18 +1436,33 @@ document.querySelectorAll('.tasks-table th[data-col]').forEach(th => {
     localStorage.setItem('tasks-sort-dir', sortDir);
     setSortUI();
     sortTable();
+    buildCardGroups();  // keep mobile cards in lockstep with the new sort
   });
 });
 setSortUI();
 sortTable();
 
+// Raw text for a sortable field on either a table row or a mobile card.
+// Table rows always carry a matching .ecell; mobile cards only render
+// .ecell spans for description/due/context-when-present, so for the fields
+// they don't spell out as text (priority, context-when-empty, start — mobile
+// has no start-date UI at all) we fall back to the element's own dataset,
+// which every task-row/task-card carries for due/context/priority.
+function rawFieldText(el, field) {
+  const sp = el.querySelector(`.ecell[data-field="${field}"]`);
+  if (sp) return sp.textContent.trim();
+  if (field === 'due')      return el.dataset.due || '';
+  if (field === 'context')  return el.dataset.ctx  || '';
+  if (field === 'priority') return el.dataset.pri  || '';
+  return '';  // description/start: no fallback available on cards
+}
+
 function colVal(row, col) {
-  const sp = row.querySelector(`.ecell[data-field="${col}"]`);
-  const t  = sp ? sp.textContent.trim() : '';
+  const t = rawFieldText(row, col);
   if (col === 'priority') {
     return PRIORITY_ORDER[t.replace(/^:+/, '').toLowerCase()] ?? 4;
   }
-  return t === '—' ? '￿' : t.toLowerCase();
+  return (t === '—' || t === '') ? '￿' : t.toLowerCase();
 }
 
 function dateGroup(due) {
@@ -1506,8 +1519,7 @@ function makeGroupHeaderEl(cls, label) {
 // isn't grouped. Mirrors the grouping in sortTable().
 function groupForRow(row) {
   if (sortCol === 'due' && sortDir === 'asc') {
-    const due = row.querySelector('.ecell[data-field="due"]')?.textContent.trim() || '—';
-    return dateGroup(due);
+    return dateGroup(rawFieldText(row, 'due') || '—');
   }
   if (sortCol === 'priority') {
     const PRI_LABELS = {0:'⬆ Top', 1:'↑ High', 2:'· Medium', 3:'↓ Low', 4:'No Priority'};
@@ -1707,15 +1719,49 @@ function applyDueStyling(el, due) {
   else if (due === today) el.classList.add('due-today');
 }
 
+// Reorder mobile cards (+ their note rows) to match the exact same
+// sortCol/sortDir/getSortLevels() state the desktop table uses, via the same
+// compareRows() comparator. This is what makes mobile and desktop guaranteed
+// to agree — there is only one live ordering rule, applied to both DOMs.
+// Archive cards (simplified markup, no .card-inner) are left fixed at the end.
+function reorderCards() {
+  const cardList = document.getElementById('card-list');
+  if (!cardList) return;
+  let archiveStart = null;
+  const pairs = [];
+  for (const card of cardList.querySelectorAll('.task-card')) {
+    if (!card.querySelector('.card-inner')) {
+      if (archiveStart === null) archiveStart = card;
+      continue;
+    }
+    pairs.push({ card, note: document.querySelector(`.card-note-row[data-id="${card.dataset.id}"]`) });
+  }
+  pairs.sort((a, b) => compareRows(a.card, b.card));
+  pairs.forEach(({ card, note }) => {
+    cardList.insertBefore(card, archiveStart);
+    if (note) cardList.insertBefore(note, archiveStart);
+  });
+}
+
 function buildCardGroups() {
   const cardList = document.getElementById('card-list');
   if (!cardList) return;
 
-  // Apply due date styling to all cards
+  reorderCards();
+
+  // Apply due date styling to all cards (independent of sort/grouping)
   [...cardList.querySelectorAll('.task-card')].forEach(card => {
     const dueEl = card.querySelector('.card-due');
     if (dueEl) applyDueStyling(dueEl, card.dataset.due);
   });
+
+  // Mirrors syncTableGroups()'s "grouped" check — description/start sorts
+  // (and due-desc) aren't grouped on desktop either, so don't group here.
+  const grouped = (sortCol === 'due' && sortDir === 'asc') || sortCol === 'priority' || sortCol === 'context';
+  if (!grouped) {
+    document.querySelectorAll('.card-group-hdr').forEach(h => h.remove());
+    return;
+  }
 
   // Compute what headers are needed and where, without touching the DOM yet
   const needed = []; // [{label, cls, beforeCard}]
@@ -1727,7 +1773,8 @@ function buildCardGroups() {
     if (card.classList.contains('completed') && !showDoneCb.checked) return;
     if (card.classList.contains('filtered-out')) return;
     if (card.style.display === 'none') return;
-    const grp = dateGroup(card.dataset.due);
+    const grp = groupForRow(card);
+    if (!grp) return;
     groupCounts[grp.label] = (groupCounts[grp.label] || 0) + 1;
     if (grp.label !== lastGroup) {
       needed.push({ label: grp.label, cls: grp.cls, beforeCard: card });
