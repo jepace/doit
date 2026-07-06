@@ -554,6 +554,12 @@
   </tr></thead>
   <tbody>
   {% for task in tasks %}
+  {% if group_headers and task.id in group_headers %}
+  {% set hdr = group_headers[task.id] %}
+  <tr class="group-header-row {{ hdr.cls }}" data-grplabel="{{ hdr.label }}">
+    <td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> {{ hdr.label }} <span class="grp-count"></span></label></td>
+  </tr>
+  {% endif %}
   <tr class="task-row pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
       data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
       data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}">
@@ -631,6 +637,10 @@
 <!-- Mobile card list -->
 <div class="task-cards-list" id="card-list">
 {% for task in tasks %}
+  {% if group_headers and task.id in group_headers %}
+  {% set hdr = group_headers[task.id] %}
+  <div class="card-group-hdr {{ hdr.cls }}" data-grplabel="{{ hdr.label }}">{{ hdr.label }} <span class="card-group-count"></span></div>
+  {% endif %}
   <div class="task-card pri-{{ task.priority or 'none' }}{% if task.complete %} completed{% endif %}"
        data-id="{{ task.id }}"
        data-hash="{{ task.content_hash }}"
@@ -837,9 +847,10 @@ function applyFilters() {
     countEl.textContent = '';
   }
 
-  // Rebuild group headers + zebra striping for the now-visible set
-  sortTable();
-  buildCardGroups();
+  // Refresh headers + zebra striping for the now-visible set. Filtering
+  // never changes row order, so skip the full resort — just resync headers.
+  syncTableGroups();
+  buildCardGroups(true);
 }
 
 function clearFilters() {
@@ -1409,8 +1420,11 @@ const PRIORITY_ORDER = {top:0, high:1, medium:2, low:3};
 localStorage.setItem('tasks-sort-level-1-dir', '{{ prefs.sort_dir2 }}');{% endif %}
 {% if prefs.sort_col3 %}localStorage.setItem('tasks-sort-level-2-col', '{{ prefs.sort_col3 }}');
 localStorage.setItem('tasks-sort-level-2-dir', '{{ prefs.sort_dir3 }}');{% endif %}
-let sortCol = localStorage.getItem('tasks-sort-col') || '{{ prefs.sort_col or "due" }}';
-let sortDir = localStorage.getItem('tasks-sort-dir') || '{{ prefs.sort_dir or "asc" }}';
+// What sort the server actually used to render the initial rows/cards.
+const serverSortCol = '{{ prefs.sort_col or "due" }}';
+const serverSortDir = '{{ prefs.sort_dir or "asc" }}';
+let sortCol = localStorage.getItem('tasks-sort-col') || serverSortCol;
+let sortDir = localStorage.getItem('tasks-sort-dir') || serverSortDir;
 function getSortLevels() {
   const lvls = [];
   for (let i = 1; i <= 3; i++) {
@@ -1440,7 +1454,20 @@ document.querySelectorAll('.tasks-table th[data-col]').forEach(th => {
   });
 });
 setSortUI();
-sortTable();
+// The server renders rows/cards/headers already sorted+grouped for
+// serverSortCol/serverSortDir. When the browser's remembered sort (secondary/
+// tertiary levels always match server prefs; only the primary column/direction
+// can diverge — see the Jinja block above) equals what the server used — the
+// common case — skip the disruptive full resort (which would strip every
+// header and re-append every row) and just reconcile via the cheap,
+// diff-based sync. That's what eliminates the "list renders, then headers
+// pop in a beat later" flash on page load.
+const orderMatchesServer = (sortCol === serverSortCol && sortDir === serverSortDir);
+if (orderMatchesServer) {
+  syncTableGroups();
+} else {
+  sortTable();
+}
 
 // Raw text for a sortable field on either a table row or a mobile card.
 // Table rows always carry a matching .ecell; mobile cards only render
@@ -1498,12 +1525,8 @@ function removeGroupHeaders() {
 // Module-level header factory (used by both sortTable and syncTableGroups).
 // Stores the label in data-grplabel so headers can be diffed/matched, and
 // wires its select-all checkbox on creation.
-function makeGroupHeaderEl(cls, label) {
-  const tr = document.createElement('tr');
-  tr.className = `group-header-row ${cls}`;
-  tr.dataset.grplabel = label;
-  tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
-  tr.querySelector('.grp-select-all').addEventListener('change', function () {
+function wireGrpSelectAll(cb) {
+  cb.addEventListener('change', function () {
     let node = this.closest('tr').nextElementSibling;
     while (node && !node.classList.contains('group-header-row')) {
       const sel = node.querySelector('.sel-cb');
@@ -1512,8 +1535,20 @@ function makeGroupHeaderEl(cls, label) {
     }
     updateBulkBtn();
   });
+}
+
+function makeGroupHeaderEl(cls, label) {
+  const tr = document.createElement('tr');
+  tr.className = `group-header-row ${cls}`;
+  tr.dataset.grplabel = label;
+  tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
+  wireGrpSelectAll(tr.querySelector('.grp-select-all'));
   return tr;
 }
+
+// Wire the select-all checkbox on any group headers the server already
+// rendered into the initial HTML (see group_headers in serve.py).
+document.querySelectorAll('.group-header-row .grp-select-all').forEach(wireGrpSelectAll);
 
 // The group a row belongs to under the current sort, or null if this sort
 // isn't grouped. Mirrors the grouping in sortTable().
@@ -1610,79 +1645,27 @@ function insertRowSorted(row, note) {
   syncTableGroups();
 }
 
-function sortTable() {
+// Reorder .task-row (+ its .note-row) via the one shared comparator
+// (compareRows) — the exact same rule reorderCards() and insertRowSorted()
+// use. No separate "table sort" algorithm anymore.
+function reorderTableRows() {
   const tbody = document.querySelector('.tasks-table tbody');
   if (!tbody) return;
-  removeGroupHeaders();
-
-  const pairs = [...document.querySelectorAll('.task-row')].map(row => ({
+  const pairs = [...tbody.querySelectorAll('.task-row')].map(row => ({
     row, note: document.querySelector(`.tasks-table .note-row[data-id="${row.dataset.id}"]`)
   }));
+  pairs.sort((a, b) => compareRows(a.row, b.row));
+  pairs.forEach(({row, note}) => { tbody.appendChild(row); if (note) tbody.appendChild(note); });
+}
 
-  const extraLevels = getSortLevels();
-  pairs.sort((a,b) => {
-    const av = colVal(a.row, sortCol), bv = colVal(b.row, sortCol);
-    let cmp = 0;
-    if (av < bv) cmp = sortDir === 'asc' ? -1 : 1;
-    else if (av > bv) cmp = sortDir === 'asc' ?  1 : -1;
-    if (cmp !== 0) return cmp;
-    for (const {col, dir} of extraLevels) {
-      if (col === sortCol) continue;
-      const xv = colVal(a.row, col), yv = colVal(b.row, col);
-      if (xv < yv) return dir === 'asc' ? -1 : 1;
-      if (xv > yv) return dir === 'asc' ?  1 : -1;
-    }
-    if (sortCol === 'due')      return colVal(a.row,'priority') - colVal(b.row,'priority');
-    if (sortCol === 'priority') {
-      const adv = colVal(a.row,'due'), bdv = colVal(b.row,'due');
-      return adv < bdv ? -1 : adv > bdv ? 1 : 0;
-    }
-    return colVal(a.row,'description').localeCompare(colVal(b.row,'description'));
-  });
-
-  pairs.forEach(({row,note}) => { tbody.appendChild(row); if (note) tbody.appendChild(note); });
-
-  const makeGroupHeader = makeGroupHeaderEl;
-
-  if (sortCol === 'due' && sortDir === 'asc') {
-    let lastKey = null;
-    for (const {row} of pairs) {
-      if (row.classList.contains('completed') || row.classList.contains('filtered-out')) continue;
-      const due = row.querySelector('.ecell[data-field="due"]')?.textContent.trim() || '—';
-      const grp = dateGroup(due);
-      if (grp.label !== lastKey) {
-        tbody.insertBefore(makeGroupHeader(grp.cls, grp.label), row);
-        lastKey = grp.label;
-      }
-    }
-  } else if (sortCol === 'priority') {
-    const PRI_LABELS = {0:'⬆ Top', 1:'↑ High', 2:'· Medium', 3:'↓ Low', 4:'No Priority'};
-    const PRI_CLS    = {0:'grp-pri-top', 1:'grp-pri-high', 2:'grp-pri-medium', 3:'grp-pri-low', 4:'grp-pri-none'};
-    let lastVal = null;
-    for (const {row} of pairs) {
-      if (row.classList.contains('filtered-out')) continue;
-      const val = colVal(row, 'priority');
-      if (val !== lastVal) {
-        tbody.insertBefore(makeGroupHeader(PRI_CLS[val] || 'grp-pri-none', PRI_LABELS[val] || 'No Priority'), row);
-        lastVal = val;
-      }
-    }
-  } else if (sortCol === 'context') {
-    let lastVal = null;
-    for (const {row} of pairs) {
-      if (row.classList.contains('filtered-out')) continue;
-      const val = colVal(row, 'context');
-      if (val !== lastVal) {
-        const label = val === '￿' ? 'No Context' : val.charAt(0).toUpperCase() + val.slice(1);
-        const cls   = val === '￿' ? 'grp-ctx-none' : 'grp-ctx';
-        tbody.insertBefore(makeGroupHeader(cls, label), row);
-        lastVal = val;
-      }
-    }
-  }
-
-  recolorRows();
-  updateGroupCounts();
+// Full resort: reorder rows, then reconcile headers via the same diff-based
+// syncTableGroups() used everywhere else. Use this when rows might actually
+// need to move (a header click, or a sort mismatch on load); when they're
+// already in the right order, call syncTableGroups() alone instead — see the
+// initial-load logic below.
+function sortTable() {
+  reorderTableRows();
+  syncTableGroups();
 }
 
 function updateGroupCounts() {
@@ -1743,11 +1726,11 @@ function reorderCards() {
   });
 }
 
-function buildCardGroups() {
+function buildCardGroups(skipReorder) {
   const cardList = document.getElementById('card-list');
   if (!cardList) return;
 
-  reorderCards();
+  if (!skipReorder) reorderCards();
 
   // Apply due date styling to all cards (independent of sort/grouping)
   [...cardList.querySelectorAll('.task-card')].forEach(card => {
@@ -1810,7 +1793,7 @@ function buildCardGroups() {
   });
 }
 
-buildCardGroups();
+buildCardGroups(orderMatchesServer);
 applyFilters();
 
 // ── Preserve scroll position across reloads ───────────────────

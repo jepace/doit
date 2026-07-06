@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
                           get_all_projects, get_tasks_file, DATA_DIR,
-                          _write_text_atomic, sort_tasks)
+                          _write_text_atomic, sort_tasks, compute_group_headers)
 from user_store import UserStore, get_user_lock
 from mailer import send_verification_email, send_reset_email
 
@@ -529,6 +529,7 @@ def favicon():
 @app.route("/")
 @require_login
 def tasks():
+    from datetime import date
     tasks_file   = _get_tasks_file()
     all_tasks    = read_tasks(tasks_file)
     # If any task is missing a stable #id, persist IDs for all tasks now so
@@ -543,9 +544,18 @@ def tasks():
     archive_list = [t for t in all_tasks if t.section == "Archive"]
     prefs      = UserStore.get_prefs(g.user["id"])
     tasks_list = sort_tasks(tasks_list, prefs)
+    # Pre-compute group headers server-side so they render in the initial
+    # HTML instead of being inserted by JS a beat after the list first paints
+    # (that gap was a visible "list redraws" flash). The client's JS still
+    # recomputes on any interactive change (sort click, filter, completion) —
+    # this only covers the common "nothing's changed since last save" load.
+    group_headers = compute_group_headers(
+        tasks_list, prefs.get("sort_col", "due"), prefs.get("sort_dir", "asc"),
+        date.today().isoformat())
     return render_template("tasks_view.html", tasks=tasks_list,
                            archive_tasks=archive_list,
                            prefs=prefs,
+                           group_headers=group_headers,
                            all_contexts=get_all_contexts(tasks_file),
                            all_projects=get_all_projects(tasks_file))
 

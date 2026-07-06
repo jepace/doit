@@ -477,3 +477,81 @@ def sort_tasks(tasks: list, prefs: dict) -> list:
         return tuple(parts)
 
     return sorted(tasks, key=key)
+
+
+# ---------------------------------------------------------------------------
+# Group headers — mirrors dateGroup()/groupForRow() in tasks_view.html so the
+# server can render group headers directly in the initial HTML. Without this,
+# the page would render header-less then have JS insert headers a beat later
+# (a visible "list redraws" flash) on every load.
+# ---------------------------------------------------------------------------
+
+import calendar
+
+_PRI_LABELS = {0: "⬆ Top", 1: "↑ High", 2: "· Medium", 3: "↓ Low", 4: "No Priority"}
+_PRI_CLS    = {0: "grp-pri-top", 1: "grp-pri-high", 2: "grp-pri-medium", 3: "grp-pri-low", 4: "grp-pri-none"}
+
+def _date_group(due: str, today: str) -> dict:
+    """Mirrors dateGroup() in tasks_view.html exactly."""
+    if not due:
+        return {"cls": "grp-none", "label": "No due date"}
+    if due < today:
+        return {"cls": "grp-overdue", "label": "Overdue"}
+    if due == today:
+        return {"cls": "grp-today", "label": "Today"}
+    today_d = date.fromisoformat(today)
+    tomorrow = (today_d + timedelta(days=1)).isoformat()
+    if due == tomorrow:
+        return {"cls": "grp-tomorrow", "label": "Tomorrow"}
+    week = (today_d + timedelta(days=7)).isoformat()
+    if due <= week:
+        return {"cls": "grp-week", "label": "This week"}
+
+    yr, mo = int(due[0:4]), int(due[5:7])
+    this_yr, this_mo = today_d.year, today_d.month
+    is_cur_mo  = (yr == this_yr and mo == this_mo)
+    is_next_mo = (yr == this_yr and mo == this_mo + 1) or (this_mo == 12 and yr == this_yr + 1 and mo == 1)
+    label = f"{calendar.month_name[mo]} {yr}"
+    if is_cur_mo or is_next_mo:
+        return {"cls": "grp-month", "label": label}
+    return {"cls": "grp-future", "label": label}
+
+def _priority_group(task) -> dict:
+    v = _PRI_ORDER.get(task.priority or "", 4)
+    return {"cls": _PRI_CLS.get(v, "grp-pri-none"), "label": _PRI_LABELS.get(v, "No Priority")}
+
+def _context_group(task) -> dict:
+    v = (task.context or "").lower()
+    if not v:
+        return {"cls": "grp-ctx-none", "label": "No Context"}
+    return {"cls": "grp-ctx", "label": v[:1].upper() + v[1:]}
+
+def group_for_task(task, sort_col: str, sort_dir: str, today: str):
+    """Which group header (if any) applies to this task. None means the
+    current sort isn't grouped (mirrors groupForRow() in tasks_view.html)."""
+    if sort_col == "due" and sort_dir == "asc":
+        return _date_group(task.due or "", today)
+    if sort_col == "priority":
+        return _priority_group(task)
+    if sort_col == "context":
+        return _context_group(task)
+    return None
+
+def compute_group_headers(tasks_list: list, sort_col: str, sort_dir: str, today: str) -> dict:
+    """Returns {task.id: {"label":..., "cls":...}} marking which tasks should
+    have a group header rendered immediately before them. tasks_list must
+    already be sorted (e.g. via sort_tasks()). Completed tasks never trigger
+    a due-based header transition (mirrors syncTableGroups() in JS), though
+    they still occupy their normal sorted position."""
+    headers = {}
+    last_label = None
+    for t in tasks_list:
+        if sort_col == "due" and sort_dir == "asc" and t.complete:
+            continue
+        g = group_for_task(t, sort_col, sort_dir, today)
+        if g is None:
+            continue
+        if g["label"] != last_label:
+            headers[t.id] = g
+            last_label = g["label"]
+    return headers
