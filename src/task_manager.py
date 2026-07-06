@@ -434,20 +434,38 @@ class _Desc:
     def __ge__(self, o): return self.s <= o.s
 
 def _col_value(task, col):
-    if col == "due":      return task.due or "9999-12-31"
-    if col == "priority": return _PRI_ORDER.get(task.priority or "", 4)
-    if col == "context":  return (task.context or "").lower()
-    if col == "name":     return task.description.lower()
+    if col == "due":         return task.due or "9999-12-31"
+    if col == "priority":    return _PRI_ORDER.get(task.priority or "", 4)
+    if col == "context":     return (task.context or "").lower()
+    if col == "description": return (task.description or "").lower()
+    if col == "start":       return task.start or "9999-12-31"
     return ""
 
 def sort_tasks(tasks: list, prefs: dict) -> list:
-    """Return a new list sorted by the user's saved sort prefs (up to 3 levels)."""
+    """Return a new list sorted by the user's saved sort prefs (up to 3 levels).
+
+    Mirrors the client-side sortTable() in tasks_view.html, including its
+    implicit tiebreak (due->priority, priority->due, else description) so the
+    print view — which has no client-side JS re-sort — matches the on-screen
+    order exactly.
+    """
     levels = [
         (prefs.get("sort_col",  "due"), prefs.get("sort_dir",  "asc")),
         (prefs.get("sort_col2", ""),    prefs.get("sort_dir2", "asc")),
         (prefs.get("sort_col3", ""),    prefs.get("sort_dir3", "asc")),
     ]
     levels = [(col, d) for col, d in levels if col]
+    if not levels:
+        levels = [("due", "asc")]
+
+    used_cols = {col for col, _ in levels}
+    primary_col = levels[0][0]
+    if primary_col == "due" and "priority" not in used_cols:
+        levels.append(("priority", "asc"))
+    elif primary_col == "priority" and "due" not in used_cols:
+        levels.append(("due", "asc"))
+    elif primary_col not in ("due", "priority") and "description" not in used_cols:
+        levels.append(("description", "asc"))
 
     def key(t):
         parts = []
