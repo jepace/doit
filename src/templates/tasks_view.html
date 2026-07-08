@@ -2007,11 +2007,17 @@ async function apiUpdate(id, field, value) {
     if (!pulling) return;
     pullDist = e.touches[0].clientY - startY;
     if (pullDist <= 0) { pulling = false; return; }
+    // Must be non-passive so we can preventDefault(): on iOS Safari, pulling
+    // down while scrollTop===0 otherwise triggers the browser's own native
+    // rubber-band/bounce, which fights our custom indicator instead of
+    // yielding to it — the classic reason a custom pull-to-refresh silently
+    // does nothing on iOS specifically.
+    e.preventDefault();
     const h = Math.min(pullDist * 0.45, THRESHOLD * 0.8);
     ptr.style.height = h + 'px';
     ptr.className = pullDist >= THRESHOLD ? 'ptr-ready' : 'ptr-pulling';
     ptrLabel.textContent = pullDist >= THRESHOLD ? 'Release to refresh' : 'Pull to refresh';
-  }, { passive: true });
+  }, { passive: false });
 
   function endPull() {
     if (!pulling) return;
