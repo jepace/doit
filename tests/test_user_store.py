@@ -140,3 +140,40 @@ class TestResetTokenIndex:
         store.consume_reset_token(token, "brandnewpass")
         u, err = store.authenticate(TEST_EMAIL, "brandnewpass")
         assert u is not None
+
+
+class TestApiToken:
+    def test_generated_token_resolves_to_user(self, store, user):
+        token = store.create_api_token(user["id"])
+        assert token is not None
+        found = store.get_user_by_api_token(token)
+        assert found is not None
+        assert found["id"] == user["id"]
+
+    def test_token_is_reusable_not_consumed(self, store, user):
+        token = store.create_api_token(user["id"])
+        assert store.get_user_by_api_token(token) is not None
+        # Unlike verify/reset tokens, looking it up again must still work.
+        assert store.get_user_by_api_token(token) is not None
+
+    def test_invalid_token_returns_none(self, store):
+        assert store.get_user_by_api_token("not-a-real-token") is None
+
+    def test_empty_token_returns_none(self, store):
+        assert store.get_user_by_api_token("") is None
+
+    def test_regenerating_invalidates_old_token(self, store, user):
+        old_token = store.create_api_token(user["id"])
+        new_token = store.create_api_token(user["id"])
+        assert old_token != new_token
+        assert store.get_user_by_api_token(old_token) is None
+        assert store.get_user_by_api_token(new_token) is not None
+
+    def test_revoke_invalidates_token(self, store, user):
+        token = store.create_api_token(user["id"])
+        store.revoke_api_token(user["id"])
+        assert store.get_user_by_api_token(token) is None
+
+    def test_revoke_without_token_is_a_noop(self, store, user):
+        store.revoke_api_token(user["id"])  # no token ever generated
+        assert store.get_user(user["id"]) is not None

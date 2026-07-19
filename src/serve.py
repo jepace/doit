@@ -642,6 +642,39 @@ def tasks_add():
     return {"ok": True}
 
 
+@app.route("/api/quick-add", methods=["POST"])
+def api_quick_add():
+    """Token-authenticated, no-session endpoint for adding a task with no
+    details beyond a due date of today — built for Siri Shortcuts (or any
+    other automation) rather than the logged-in browser UI. Not covered by
+    the CSRF check (no session cookie is involved), and not by @require_login
+    (auth is the bearer token, not the session)."""
+    if not _check_rate_limit(f"quickadd:{_ip()}", max_requests=30, window_seconds=60):
+        return {"error": "Too many requests"}, 429
+
+    data = request.get_json(silent=True) or {}
+
+    auth  = request.headers.get("Authorization", "")
+    token = auth[7:].strip() if auth.startswith("Bearer ") else (
+        data.get("token") or request.form.get("token") or request.args.get("token") or "")
+    user = UserStore.get_user_by_api_token(token)
+    if not user:
+        return {"error": "Invalid or missing token"}, 401
+
+    text = (data.get("text") or request.form.get("text") or request.args.get("text") or "").strip()
+    if not text:
+        return {"error": "Empty task"}, 400
+
+    from datetime import date
+    today = date.today().isoformat()
+    full_text = f"{text} #due:{today} #start:{today}"
+
+    g.user = user  # _add_task()/_get_tasks_file() key off g.user, same as require_login routes
+    with get_user_lock(user["id"]):
+        _add_task(full_text, "Inbox")
+    return {"ok": True}
+
+
 @app.route("/tasks/update", methods=["POST"])
 @require_login
 def tasks_update():
@@ -778,6 +811,8 @@ def settings():
     user   = g.user
     errors = {}
     success = request.args.get("saved") == "1"
+    base_url = cfg_get("server", "base_url",
+                       f"http://127.0.0.1:{cfg_int('server','port',8080)}")
 
     if request.method == "POST":
         action = request.form.get("action")
@@ -801,9 +836,7 @@ def settings():
             new_email = request.form.get("new_email", "").strip().lower()
             try:
                 UserStore.change_email(user["id"], new_email)
-                token    = UserStore.create_verify_token(user["id"])
-                base_url = cfg_get("server", "base_url",
-                                   f"http://127.0.0.1:{cfg_int('server','port',8080)}")
+                token = UserStore.create_verify_token(user["id"])
                 ok = send_verification_email(new_email, token, base_url)
                 if not ok:
                     log.error("settings: verification email failed for %s (user %s)", new_email, user["id"])
@@ -827,9 +860,23 @@ def settings():
                 else:
                     errors["password"] = msg
 
+        elif action == "api_token_generate":
+            # Rendered directly (not redirected) so the plaintext token is
+            # shown exactly once — it's never stored or shown again after this.
+            new_token = UserStore.create_api_token(user["id"])
+            user  = UserStore.get_user(user["id"])
+            prefs = UserStore.get_prefs(user["id"])
+            return render_template("settings.html", user=user, prefs=prefs,
+                                   errors=errors, success=False, base_url=base_url,
+                                   api_token_plain=new_token)
+
+        elif action == "api_token_revoke":
+            UserStore.revoke_api_token(user["id"])
+            return redirect(url_for("settings", saved="1"))
+
     prefs = UserStore.get_prefs(user["id"])
     return render_template("settings.html", user=user, prefs=prefs,
-                           errors=errors, success=success)
+                           errors=errors, success=success, base_url=base_url)
 
 
 @app.route("/admin")

@@ -221,6 +221,64 @@
     </div>
   </form>
 
+  <!-- ── Siri Shortcuts / Quick Add ──────────────────── -->
+  <div class="section" style="margin-top:24px;">
+    <h2>Siri Shortcuts (Quick Add)</h2>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:14px;">
+      Generate a token to add tasks by voice ("Hey Siri, add a task") or from
+      any automation. Quick-added tasks get no details beyond a due date of
+      today, and land in your Inbox.
+    </p>
+
+    {% if api_token_plain %}
+      <div class="success-banner" style="margin-bottom:14px;">
+        New token generated — copy it now, it won't be shown again:
+      </div>
+      <div class="field">
+        <input type="text" readonly value="{{ api_token_plain }}"
+               onclick="this.select()"
+               style="font-family:monospace;font-size:13px;">
+      </div>
+      <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">
+        In the iOS <strong>Shortcuts</strong> app: New Shortcut → <em>Get Contents of URL</em> →
+        URL <code>{{ base_url }}/api/quick-add</code>, Method <strong>POST</strong>,
+        Headers: <code>Authorization</code> = <code>Bearer {{ api_token_plain }}</code>,
+        Request Body: JSON with a <code>text</code> field set to <em>Ask Each Time</em>
+        (or to dictated Siri text). Then add it to Siri with a phrase like
+        "Add a task."
+      </p>
+    {% elif user.api_token_hash %}
+      <p style="font-size:14px;margin-bottom:14px;">
+        A token is <strong style="color:var(--success);">configured</strong>.
+        Endpoint: <code>{{ base_url }}/api/quick-add</code>
+      </p>
+    {% else %}
+      <p style="font-size:14px;color:var(--text2);margin-bottom:14px;">
+        No token yet.
+      </p>
+    {% endif %}
+
+    <div style="display:flex;gap:10px;">
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="api_token_generate">
+        <button type="submit" class="btn-save">
+          {{ 'Regenerate' if user.api_token_hash else 'Generate' }} Token
+        </button>
+      </form>
+      {% if user.api_token_hash %}
+      <form method="post">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="action" value="api_token_revoke">
+        <button type="submit" class="btn-save" style="background:var(--danger);"
+                onclick="return confirm('Revoke the Siri Shortcuts token? Any existing Shortcut will stop working.')">
+          Revoke
+        </button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+
 </div>
 </div>
 

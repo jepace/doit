@@ -413,6 +413,60 @@ class UserStore:
             _write_json(_profile_path(user_id), p)
         return True
 
+    @classmethod
+    def create_api_token(cls, user_id: str) -> str | None:
+        """Generate (or regenerate) a long-lived API token for the quick-add
+        endpoint (Siri Shortcuts etc). Unlike verify/reset tokens this one is
+        not single-use — it's looked up repeatedly, not consumed."""
+        plain = secrets.token_urlsafe(24)
+        h = _token_hash(plain)
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return None
+            old_h = p.get("api_token_hash")
+            p["api_token_hash"] = h
+            _write_json(_profile_path(user_id), p)
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            if old_h:
+                idx.pop(old_h, None)
+            idx[h] = user_id
+            _save_token_index(idx)
+        return plain
+
+    @classmethod
+    def revoke_api_token(cls, user_id: str) -> None:
+        old_h = None
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return
+            old_h = p.get("api_token_hash")
+            p["api_token_hash"] = None
+            _write_json(_profile_path(user_id), p)
+        if old_h:
+            with _get_lock("token_index"):
+                idx = _load_token_index()
+                idx.pop(old_h, None)
+                _save_token_index(idx)
+
+    @classmethod
+    def get_user_by_api_token(cls, plain_token: str) -> dict | None:
+        """Look up a user by their API token. Does not consume/delete it —
+        meant to be reused on every quick-add call."""
+        if not plain_token:
+            return None
+        h = _token_hash(plain_token)
+        with _get_lock("token_index"):
+            user_id = _load_token_index().get(h)
+        if user_id is None:
+            return None
+        p = _read_json(_profile_path(user_id))
+        if not p or not secrets.compare_digest(p.get("api_token_hash") or "", h):
+            return None
+        return cls.get_user(user_id)
+
     # ── Preferences ───────────────────────────────────────────────────────
 
     @classmethod

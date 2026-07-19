@@ -270,6 +270,97 @@ class TestAddTask:
 
 
 # ---------------------------------------------------------------------------
+# Quick add (Siri Shortcuts) — token-authenticated, no session/CSRF involved
+# ---------------------------------------------------------------------------
+
+class TestQuickAdd:
+    def _token(self):
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        return us.UserStore.create_api_token(user["id"])
+
+    def test_valid_token_adds_task(self, client):
+        token = self._token()
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "Call the vet"}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+        assert r.get_json()["ok"] is True
+
+    def test_added_task_is_due_today(self, client):
+        from datetime import date
+        token = self._token()
+        client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "Water the plants"}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        import user_store as us
+        from task_manager import read_tasks
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tasks = read_tasks(us._user_dir(user["id"]) / "tasks.md")
+        added = next(t for t in tasks if t.description == "Water the plants")
+        assert added.due == date.today().isoformat()
+        assert added.start == date.today().isoformat()
+
+    def test_no_token_returns_401(self, client):
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "Should fail"}),
+            content_type="application/json",
+        )
+        assert r.status_code == 401
+
+    def test_bad_token_returns_401(self, client):
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "Should fail"}),
+            content_type="application/json",
+            headers={"Authorization": "Bearer not-a-real-token"},
+        )
+        assert r.status_code == 401
+
+    def test_revoked_token_returns_401(self, client):
+        import user_store as us
+        token = self._token()
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        us.UserStore.revoke_api_token(user["id"])
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "Should fail"}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 401
+
+    def test_empty_text_returns_400(self, client):
+        token = self._token()
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "   "}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 400
+
+    def test_no_session_or_csrf_needed(self, client):
+        """The whole point: this must work with zero cookies/session state,
+        since Siri Shortcuts can't carry a browser session or CSRF token."""
+        token = self._token()
+        r = client.post(
+            "/api/quick-add",
+            data=json.dumps({"text": "No session needed"}),
+            content_type="application/json",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # Update task
 # ---------------------------------------------------------------------------
 
