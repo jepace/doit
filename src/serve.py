@@ -169,10 +169,13 @@ _behind_proxy: bool = False
 
 
 def _ip() -> str:
-    if _behind_proxy:
-        # ProxyFix has already resolved request.remote_addr from X-Forwarded-For
-        return request.remote_addr or "unknown"
+    # request.remote_addr is already the real client IP in both cases: when
+    # _behind_proxy is set, ProxyFix has rewritten it from X-Forwarded-For.
     return request.remote_addr or "unknown"
+
+
+def _base_url() -> str:
+    return cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
 
 
 def _safe_next(url: str) -> str:
@@ -279,7 +282,7 @@ def register():
                 try:
                     user = UserStore.create_user(email, password)
                     token = UserStore.create_verify_token(user["id"])
-                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+                    base_url = _base_url()
                     ok = send_verification_email(email, token, base_url)
                     if not ok:
                         log.error("register: verification email failed for %s", email)
@@ -322,7 +325,7 @@ def auth_resend_verify():
         user = UserStore.get_by_email(email)
         if user and not user.get("verified"):
             token = UserStore.create_verify_token(user["id"])
-            base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+            base_url = _base_url()
             ok = send_verification_email(email, token, base_url)
             if not ok:
                 log.error("resend-verify: email send failed for %s", email)
@@ -443,7 +446,7 @@ def auth_forgot():
                 token, user = UserStore.create_reset_token(email)
                 if token and user:
                     log.info("password-reset: token issued for %s from %s", email, ip)
-                    base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+                    base_url = _base_url()
                     ok = send_reset_email(email, token, base_url)
                     if not ok:
                         log.error("password-reset: email send failed for %s", email)
@@ -811,8 +814,7 @@ def settings():
     user   = g.user
     errors = {}
     success = request.args.get("saved") == "1"
-    base_url = cfg_get("server", "base_url",
-                       f"http://127.0.0.1:{cfg_int('server','port',8080)}")
+    base_url = _base_url()
 
     if request.method == "POST":
         action = request.form.get("action")
@@ -942,7 +944,7 @@ def admin_resend_verify(user_id):
     user = UserStore.get_user(user_id)
     if user and not user.get("verified"):
         token = UserStore.create_verify_token(user_id)
-        base_url = cfg_get("server", "base_url", f"http://127.0.0.1:{cfg_int('server', 'port', 8080)}")
+        base_url = _base_url()
         ok = send_verification_email(user["email"], token, base_url)
         if not ok:
             log.error("admin: resend-verify email failed for %s (user %s)", user["email"], user_id)

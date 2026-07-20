@@ -3,6 +3,7 @@
 Task manager for wiki/tasks.md. Parses, filters, and updates tasks.
 """
 
+import calendar
 import hashlib
 import os
 import re
@@ -326,10 +327,9 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
     archive_lines = lines[archive_start + 1:] if archive_start is not None else []
 
     def _process_section(section_lines, task_count_start):
-        """Iterate lines, rewrite tasks via map. Returns (new_lines, newly_archived, reopened, task_count)."""
+        """Iterate lines, rewrite tasks via map. Returns (new_lines, newly_archived, task_count)."""
         out = []
         archived = []
-        reopened = []
         task_count = task_count_start
         i = 0
         while i < len(section_lines):
@@ -355,9 +355,9 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
                 continue
             out.append(line)
             i += 1
-        return out, archived, reopened, task_count
+        return out, archived, task_count
 
-    new_body, newly_archived, _, task_count = _process_section(body_lines, 0)
+    new_body, newly_archived, task_count = _process_section(body_lines, 0)
 
     if extra_lines:
         new_body.extend(extra_lines)
@@ -485,8 +485,6 @@ def sort_tasks(tasks: list, prefs: dict) -> list:
 # the page would render header-less then have JS insert headers a beat later
 # (a visible "list redraws" flash) on every load.
 # ---------------------------------------------------------------------------
-
-import calendar
 
 _PRI_LABELS = {0: "⬆ Top", 1: "↑ High", 2: "· Medium", 3: "↓ Low", 4: "No Priority"}
 _PRI_CLS    = {0: "grp-pri-top", 1: "grp-pri-high", 2: "grp-pri-medium", 3: "grp-pri-low", 4: "grp-pri-none"}
