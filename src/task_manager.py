@@ -29,6 +29,19 @@ def get_tasks_file(user_id: str) -> Path:
     return DATA_DIR / user_id / "tasks.md"
 
 
+def get_archive_file(user_id: str) -> Path:
+    """Return the archive.md path for the given user.
+
+    Completed history lives in its own file so that (a) it is never parsed or
+    rewritten by ordinary edits to active tasks, and (b) it isn't shipped to
+    the browser on every page load.
+    """
+    return DATA_DIR / user_id / "archive.md"
+
+
+ARCHIVE_HEADER = "# Archive\n\n## Archive\n\n"
+
+
 def _write_text_atomic(path: Path, content: str) -> None:
     """Write content to path via a temp file so a crash never leaves a partial write."""
     tmp = path.with_suffix(".tmp")
@@ -295,13 +308,75 @@ def _lookup_task(line: str, task_count: int,
     return pos_map.get(task_count)
 
 
-def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
+def append_archive_lines(lines: list, archive_file: Path) -> None:
+    """Append already-rendered lines to archive.md, creating it if needed.
+
+    A true append — the existing archive is never read or rewritten, so the
+    cost of completing a task doesn't grow with the size of your history, and
+    routine writes can't corrupt entries they never touch. Order in the file is
+    therefore oldest-first; callers that display the archive sort it themselves.
+    """
+    if not lines:
+        return
+    archive_file.parent.mkdir(parents=True, exist_ok=True)
+    if not archive_file.exists():
+        archive_file.write_text(ARCHIVE_HEADER, encoding="utf-8")
+    with open(archive_file, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def append_to_archive(tasks: list, archive_file: Path) -> None:
+    """Append Task objects to archive.md."""
+    lines = []
+    for t in tasks:
+        lines.extend(_render_task_lines(t))
+    append_archive_lines(lines, archive_file)
+
+
+def append_to_tasks(lines: list, tasks_file: Path) -> None:
+    """Append already-rendered task lines to the end of tasks.md's body."""
+    if not lines:
+        return
+    existing = tasks_file.read_text(encoding="utf-8") if tasks_file.exists() else "# Tasks\n\n## Inbox\n"
+    existing = existing.rstrip("\n")
+    _write_text_atomic(tasks_file, existing + "\n" + "\n".join(lines) + "\n")
+
+
+def write_archive(tasks: list, archive_file: Path,
+                  tasks_file: Path | None = None) -> list:
+    """Rewrite archive.md from `tasks` (the list previously read from it).
+
+    Tasks no longer marked complete are dropped from the archive; if tasks_file
+    is given they are appended back into it first, so an interruption leaves the
+    task in both files (recoverable) rather than in neither. Tasks absent from
+    `tasks` are treated as deleted. Only needed for reopen / edit / delete of
+    archived items — completing a task uses the cheap append path instead.
+    """
+    kept, reopened = [], []
+    for t in tasks:
+        (kept if t.complete else reopened).extend(_render_task_lines(t))
+    # Destination before source.
+    if reopened and tasks_file is not None:
+        append_to_tasks(reopened, tasks_file)
+    archive_file.parent.mkdir(parents=True, exist_ok=True)
+    body = ("\n".join(kept) + "\n") if kept else ""
+    _write_text_atomic(archive_file, ARCHIVE_HEADER + body)
+    return reopened
+
+
+def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None,
+                archive_file: Path | None = None):
     """Write updated tasks back to the given tasks file.
 
     Tasks are matched by their #id tag (stable across reorders).
     Tasks without an #id get one assigned now (one-time migration).
-    Completed tasks move to ## Archive; reopened archive tasks return to body.
     extra_lines: raw lines appended to body before Archive (for new recurrences).
+
+    archive_file: when given, completed tasks are appended there instead of to
+    an in-file '## Archive' section, and any legacy '## Archive' block still
+    present in tasks_file is migrated out to it. The archive is written before
+    tasks_file, so an interrupted move leaves a duplicate (recoverable) rather
+    than losing the task. When None, the historical single-file layout is kept.
     """
     if not tasks_file.exists():
         return
@@ -326,10 +401,18 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
     body_lines    = lines[:archive_start] if archive_start is not None else lines
     archive_lines = lines[archive_start + 1:] if archive_start is not None else []
 
-    def _process_section(section_lines, task_count_start):
-        """Iterate lines, rewrite tasks via map. Returns (new_lines, newly_archived, task_count)."""
+    def _process_section(section_lines, task_count_start, drop_other_lines=False):
+        """Rewrite one section's task lines from the in-memory tasks.
+
+        Returns (incomplete_lines, complete_tasks, task_count). Which of those
+        two is "kept" depends on the section: in the body, incomplete lines stay
+        and complete tasks move to the archive; in an archive section it's the
+        other way round. drop_other_lines discards non-task lines (blank lines
+        and headers), which is what the archive section wants since it is
+        rebuilt from a fixed header.
+        """
         out = []
-        archived = []
+        complete = []
         task_count = task_count_start
         i = 0
         while i < len(section_lines):
@@ -338,7 +421,7 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
                 task = _lookup_task(line, task_count, id_map, pos_map)
                 if task is not None:
                     if task.complete:
-                        archived.append(task)
+                        complete.append(task)
                     else:
                         out.extend(_render_task_lines(task))
                 else:
@@ -353,39 +436,23 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
                         break
                     i += 1
                 continue
-            out.append(line)
+            if not drop_other_lines:
+                out.append(line)
             i += 1
-        return out, archived, task_count
+        return out, complete, task_count
 
     new_body, newly_archived, task_count = _process_section(body_lines, 0)
 
     if extra_lines:
         new_body.extend(extra_lines)
 
-    # Process archive section: keep completed, move reopened to body
+    # Any '## Archive' section inside tasks_file: still-complete tasks stay
+    # archived, ones that were reopened move back into the body.
+    reopened_from_archive, still_archived, task_count = _process_section(
+        archive_lines, task_count, drop_other_lines=True)
     existing_archive_out = []
-    reopened_from_archive = []
-    if archive_lines:
-        i = 0
-        while i < len(archive_lines):
-            line = archive_lines[i]
-            if re.match(r'^\s*- \[[x ]\]', line):
-                task = _lookup_task(line, task_count, id_map, pos_map)
-                if task is not None:
-                    if task.complete:
-                        existing_archive_out.extend(_render_task_lines(task))
-                    else:
-                        reopened_from_archive.extend(_render_task_lines(task))
-                task_count += 1
-                i += 1
-                while i < len(archive_lines):
-                    nxt = archive_lines[i]
-                    if re.match(r'^##', nxt) or re.match(r'^- \[[x ]\]', nxt):
-                        break
-                    i += 1
-                continue
-            existing_archive_out.append(line)
-            i += 1
+    for task in still_archived:
+        existing_archive_out.extend(_render_task_lines(task))
 
     if reopened_from_archive:
         new_body.extend(reopened_from_archive)
@@ -400,13 +467,20 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None):
 
     final_lines = new_body
 
-    has_archive = new_archive_entries or existing_archive_out
-    if has_archive:
-        final_lines += ['', '## Archive', '']
-        final_lines.extend(new_archive_entries)
-        final_lines.extend(existing_archive_out)
-    else:
+    if archive_file is not None:
+        # Two-file layout. Append completions (and fold out any legacy in-file
+        # archive section) BEFORE rewriting tasks_file, so an interruption
+        # duplicates a task rather than dropping it.
+        append_archive_lines(new_archive_entries + existing_archive_out, archive_file)
         final_lines.append('')
+    else:
+        has_archive = new_archive_entries or existing_archive_out
+        if has_archive:
+            final_lines += ['', '## Archive', '']
+            final_lines.extend(new_archive_entries)
+            final_lines.extend(existing_archive_out)
+        else:
+            final_lines.append('')
 
     _write_text_atomic(tasks_file, '\n'.join(final_lines))
 

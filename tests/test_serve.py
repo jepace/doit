@@ -530,15 +530,21 @@ class TestBulkUpdate:
 
         from task_manager import read_tasks
         before = read_tasks(tasks_file)
-        count_before = len(before)
-        target_id = before[0].id
+        # Count only active tasks: completed ones are relocated to archive.md.
+        active_before = [t for t in before if not t.complete]
+        target_id = active_before[0].id
 
         r = self._bulk(authed_client, "delete", [target_id])
         assert r.get_json()["ok"] is True
 
         after = read_tasks(tasks_file)
-        assert len(after) == count_before - 1
+        assert len(after) == len(active_before) - 1
+        assert target_id not in [t.id for t in after]
         assert all("[DELETED]" not in t.description for t in after)
+        # ...and it wasn't quietly moved into the archive either.
+        archive_file = us._user_dir(user["id"]) / "archive.md"
+        if archive_file.exists():
+            assert target_id not in [t.id for t in read_tasks(archive_file)]
 
 
 # ---------------------------------------------------------------------------
@@ -564,14 +570,19 @@ class TestRecurrenceAtomicWrite:
         )
         assert r.get_json()["ok"] is True
 
+        # The next occurrence stays in tasks.md as an open task...
         after = read_tasks(tasks_file)
-        # Completed task moves to Archive; next recurrence added as open task
-        # Total count stays the same (one archived, one new open)
         open_recurring = [t for t in after if t.recurrence and not t.complete]
-        archived_recurring = [t for t in after if t.recurrence and t.complete and t.section == "Archive"]
         assert len(open_recurring) == 1
         assert open_recurring[0].recurrence == "1w"
-        assert len(archived_recurring) == 1
+        assert open_recurring[0].id != recurring_task.id      # fresh occurrence
+        assert not any(t.complete for t in after)             # nothing completed left behind
+
+        # ...and the completed one is in archive.md, not tasks.md.
+        archive_file = us._user_dir(user["id"]) / "archive.md"
+        archived = read_tasks(archive_file)
+        assert recurring_task.id in [t.id for t in archived]
+        assert all(t.complete for t in archived)
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +631,140 @@ class TestCsrfEnforcement:
 # ---------------------------------------------------------------------------
 # Security — hardening regressions from the remote-attack-surface review
 # ---------------------------------------------------------------------------
+
+class TestArchiveSplit:
+    """Completed history lives in archive.md, is fetched on demand, and is
+    never rewritten by ordinary edits."""
+
+    def _files(self):
+        import user_store as us
+        uid = us.UserStore.get_by_email(TEST_EMAIL)["id"]
+        return us._user_dir(uid) / "tasks.md", us._user_dir(uid) / "archive.md"
+
+    def test_completing_moves_task_to_archive_file(self, authed_client):
+        from task_manager import read_tasks
+        tasks_file, archive_file = self._files()
+        tid = _task_id(authed_client, 0)
+
+        r = authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": tid, "field": "complete", "value": "true"}),
+            content_type="application/json")
+        assert r.get_json()["ok"] is True
+
+        assert tid not in [t.id for t in read_tasks(tasks_file)]
+        assert tid in [t.id for t in read_tasks(archive_file)]
+
+    def test_page_does_not_contain_archived_tasks(self, authed_client):
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] SECRET_ARCHIVED_TASK #done:2026-01-01 #id:cc0001\n", encoding="utf-8")
+        r = authed_client.get("/")
+        assert r.status_code == 200
+        assert b"SECRET_ARCHIVED_TASK" not in r.data     # not shipped to the browser
+
+    def test_archive_endpoint_returns_archived_tasks_newest_first(self, authed_client):
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] older #done:2026-01-01 #id:cc0001\n"
+            "- [x] newer #done:2026-06-01 #id:cc0002\n", encoding="utf-8")
+        data = authed_client.get("/tasks/archive").get_json()
+        assert data["ok"] is True
+        assert [t["description"] for t in data["tasks"]] == ["newer", "older"]
+
+    def test_archive_endpoint_requires_login(self, client):
+        r = client.get("/tasks/archive")
+        assert r.status_code == 302
+
+    def test_reopening_archived_task_moves_it_back(self, authed_client):
+        from task_manager import read_tasks
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] resurrect me #done:2026-01-01 #id:cc0009\n", encoding="utf-8")
+
+        r = authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": "cc0009", "field": "complete", "value": "false"}),
+            content_type="application/json")
+        assert r.get_json()["ok"] is True
+
+        assert "cc0009" in [t.id for t in read_tasks(tasks_file)]
+        assert "cc0009" not in [t.id for t in read_tasks(archive_file)]
+
+    def test_editing_archived_task_keeps_it_archived(self, authed_client):
+        from task_manager import read_tasks
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] old title #done:2026-01-01 #id:cc0010\n", encoding="utf-8")
+
+        r = authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": "cc0010", "field": "description", "value": "new title"}),
+            content_type="application/json")
+        assert r.get_json()["ok"] is True
+
+        archived = read_tasks(archive_file)
+        assert [t.description for t in archived] == ["new title"]
+        assert "cc0010" not in [t.id for t in read_tasks(tasks_file)]
+
+    def test_deleting_archived_task_removes_it(self, authed_client):
+        from task_manager import read_tasks
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] delete me #done:2026-01-01 #id:cc0011\n", encoding="utf-8")
+
+        r = authed_client.post("/tasks/bulk-update", data=json.dumps(
+            {"action": "delete", "task_ids": ["cc0011"], "value": ""}),
+            content_type="application/json")
+        assert r.get_json()["ok"] is True
+        assert read_tasks(archive_file) == [] or \
+               "cc0011" not in [t.id for t in read_tasks(archive_file)]
+
+    def test_ordinary_edit_does_not_rewrite_archive(self, authed_client):
+        """The point of the split: history is untouched by routine writes."""
+        tasks_file, archive_file = self._files()
+        archive_file.write_text(
+            "# Archive\n\n## Archive\n\n"
+            "- [x] untouched #done:2026-01-01 #id:cc0012\n", encoding="utf-8")
+
+        # One warm-up write first: the stock fixture has a completed task still
+        # in tasks.md, and flushing that legacy entry out to archive.md is a
+        # legitimate archive write. Snapshot only once that has settled.
+        tid = _task_id(authed_client, 0)
+        authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": tid, "field": "priority", "value": "medium"}),
+            content_type="application/json")
+
+        before_bytes = archive_file.read_bytes()
+        before_mtime = archive_file.stat().st_mtime_ns
+
+        authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": tid, "field": "priority", "value": "high"}),
+            content_type="application/json")
+
+        assert archive_file.read_bytes() == before_bytes
+        assert archive_file.stat().st_mtime_ns == before_mtime
+
+    def test_legacy_in_file_archive_is_migrated_on_write(self, authed_client):
+        """An old tasks.md with a '## Archive' section folds out on next write."""
+        from task_manager import read_tasks
+        tasks_file, archive_file = self._files()
+        tasks_file.write_text(
+            "# Tasks\n\n## Inbox\n\n"
+            "- [ ] still active #id:dd0001\n"
+            "\n## Archive\n\n"
+            "- [x] legacy archived #done:2026-01-01 #id:dd0002\n", encoding="utf-8")
+
+        authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": "dd0001", "field": "priority", "value": "low"}),
+            content_type="application/json")
+
+        assert "dd0002" not in [t.id for t in read_tasks(tasks_file)]
+        assert "dd0002" in [t.id for t in read_tasks(archive_file)]
+        assert "## Archive" not in tasks_file.read_text()
+
 
 class TestRegistrationDoesNotEnumerate:
     """POSTing an address that already has an account must be

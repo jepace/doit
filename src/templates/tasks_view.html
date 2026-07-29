@@ -608,23 +608,6 @@
     </td>
   </tr>
   {% endfor %}
-  {% for task in archive_tasks %}
-  <tr class="task-row completed pri-{{ task.priority or 'none' }} {% if loop.index0 % 2 == 0 %}row-odd{% else %}row-even{% endif %}"
-      data-id="{{ task.id }}" data-hash="{{ task.content_hash }}" data-done="{{ task.tags.get('#done', '') }}"
-      data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}" style="display:none">
-    <td class="col-done"><input type="checkbox" class="done-cb primary-cb" autocomplete="off" data-id="{{ task.id }}" checked></td>
-    <td class="col-task">
-      <span class="ecell" data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
-    </td>
-    <td class="col-ctx"><span class="ecell{% if not task.context %} empty{% endif %}" data-id="{{ task.id }}" data-field="context">{{ task.context or '—' }}</span></td>
-    <td class="col-due"><span class="ecell{% if not task.due %} empty{% endif %}" data-id="{{ task.id }}" data-field="due">{{ task.due or '—' }}</span></td>
-    <td class="col-rep"><span class="ecell{% if not task.recurrence %} empty{% endif %}" data-id="{{ task.id }}" data-field="recurrence">{{ task.recurrence or '—' }}</span></td>
-    <td class="col-pri"><span class="ecell{% if not task.priority %} empty{% endif %}" data-id="{{ task.id }}" data-field="priority">{{ task.priority|capitalize if task.priority else '—' }}</span></td>
-    <td class="col-start"><span class="ecell{% if not task.start %} empty{% endif %}" data-id="{{ task.id }}" data-field="start">{{ task.start or '—' }}</span></td>
-    <td class="col-note"></td>
-    <td class="col-sel"><input type="checkbox" class="sel-cb" autocomplete="off" data-id="{{ task.id }}" style="display:block;margin:0 auto"></td>
-  </tr>
-  {% endfor %}
   </tbody>
 </table>
 
@@ -686,19 +669,9 @@
     </div>
   </div>
 {% endfor %}
-{% for task in archive_tasks %}
-<div class="task-card completed pri-{{ task.priority or 'none' }}"
-     data-id="{{ task.id }}"
-     data-hash="{{ task.content_hash }}"
-     data-ctx="{{ task.context or '' }}" data-pri="{{ task.priority or '' }}" data-due="{{ task.due or '' }}"
-     data-complete="true"
-     style="display:none">
-  <div style="display:flex;align-items:center;gap:8px">
-    <input type="checkbox" class="card-cb" autocomplete="off" data-id="{{ task.id }}" checked>
-    <div class="card-task-name"><span data-id="{{ task.id }}" data-field="description">{{ task.description }}</span>{% if task.tags.get('#done') %} <span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}</div>
-  </div>
-</div>
-{% endfor %}
+{# Completed tasks are NOT rendered here — they live in archive.md and are
+   fetched by /tasks/archive when "Show completed" is first ticked. Emitting
+   them inline (hidden) made every page load carry the whole history twice. #}
 </div>
 
 {% else %}
@@ -775,13 +748,83 @@ function applyShowDone() {
     if (nr) nr.style.display = hide ? 'none' : '';
   });
 }
+
+// Completed history isn't in the page — it's fetched from /tasks/archive the
+// first time it's needed, so page weight no longer grows with the archive.
+let archiveLoaded = false, archiveLoading = false;
+
+function markAsCompletedRow(row, t) {
+  row.classList.add('completed');
+  const cb = row.querySelector('.primary-cb');
+  if (cb) cb.checked = true;
+  if (t.done) {
+    const span = document.createElement('span');
+    span.className = 'done-date';
+    span.textContent = ` ✓ ${t.done}`;
+    row.querySelector('.ecell[data-field="description"]')?.after(span);
+  }
+}
+
+async function loadArchive() {
+  if (archiveLoaded || archiveLoading) return;
+  archiveLoading = true;
+  try {
+    const r = await fetch('/tasks/archive');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const data = await r.json();
+    const tbody = document.querySelector('.tasks-table tbody');
+    const cardList = document.getElementById('card-list');
+
+    (data.tasks || []).forEach(t => {
+      if (!t.id || document.querySelector(`.task-row[data-id="${t.id}"]`)) return;
+      if (tbody) {
+        const row = createTaskRow(t), note = createNoteRow(t, 'table');
+        markAsCompletedRow(row, t);
+        tbody.appendChild(row); tbody.appendChild(note);
+        wirePrimaryCb(row.querySelector('.primary-cb'));
+        wireSelCb(row.querySelector('.sel-cb'));
+        row.querySelectorAll('.ecell').forEach(wireEcell);
+        wireNoteBtn(row.querySelector('.note-btn'));
+      }
+      if (cardList) {
+        const card = createTaskCard(t), cnote = createNoteRow(t, 'card');
+        card.classList.add('completed');
+        card.dataset.complete = 'true';
+        const ccb = card.querySelector('.card-cb');
+        if (ccb) ccb.checked = true;
+        cardList.appendChild(card); cardList.appendChild(cnote);
+        wireCardCb(ccb);
+        card.querySelectorAll('.ecell').forEach(wireEcell);
+        wireNoteBtn(card.querySelector('.card-note-btn'));
+        wireCardSwipe(card);
+      }
+    });
+    archiveLoaded = true;
+  } catch (e) {
+    console.error('archive load failed', e);
+    alert('Could not load completed tasks — please try again.');
+    showDoneCb.checked = false;
+    localStorage.setItem('tasks-show-done', 'false');
+  } finally {
+    archiveLoading = false;
+  }
+}
+
+async function refreshShowDone() {
+  if (showDoneCb.checked) await loadArchive();
+  applyShowDone();
+  sortTable();
+  buildCardGroups();
+}
+
 showDoneCb.addEventListener('change', () => {
   localStorage.setItem('tasks-show-done', showDoneCb.checked);
-  applyShowDone();
-  recolorRows();
+  refreshShowDone();
 });
 showDoneCb.checked = localStorage.getItem('tasks-show-done') === 'true';
 applyShowDone();
+// If the toggle was left on from a previous visit, pull the archive in now.
+if (showDoneCb.checked) window.addEventListener('DOMContentLoaded', refreshShowDone);
 
 // ── Global filters ───────────────────────────────────────────
 let filters = {};

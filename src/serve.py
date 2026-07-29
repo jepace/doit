@@ -31,7 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
-                          get_all_projects, get_tasks_file, DATA_DIR,
+                          get_all_projects, get_tasks_file, get_archive_file,
+                          append_to_archive, write_archive, DATA_DIR,
                           _write_text_atomic, sort_tasks, compute_group_headers)
 from user_store import (UserStore, get_user_lock, is_valid_user_id,
                         EmailTakenError)
@@ -577,9 +578,31 @@ def _get_tasks_file():
     return get_tasks_file(g.user["id"])
 
 
+def _get_archive_file():
+    return get_archive_file(g.user["id"])
+
+
 def _find_task_by_id(tasks_list: list, task_id: str):
     """Look up a task by its stable #id tag."""
     return next((t for t in tasks_list if t.id == task_id), None)
+
+
+def _load_for_edit(task_id: str):
+    """Locate a task across the active and archive files.
+
+    Returns (task, task_list, in_archive). The active file is checked first so
+    that ordinary edits never pay the cost of parsing the archive — only an
+    operation on an already-completed task reads archive.md.
+    """
+    tasks_list = read_tasks(_get_tasks_file())
+    task = _find_task_by_id(tasks_list, task_id)
+    if task is not None:
+        return task, tasks_list, False
+    archived = read_tasks(_get_archive_file())
+    task = _find_task_by_id(archived, task_id)
+    if task is not None:
+        return task, archived, True
+    return None, tasks_list, False
 
 
 def _clean_line(value: str, limit: int = MAX_TASK_TEXT) -> str:
@@ -656,10 +679,13 @@ def tasks():
     # task B, changing its hash, causing a spurious 409 on the next update.
     if any(not t.id for t in all_tasks):
         with get_user_lock(g.user["id"]):
-            write_tasks(all_tasks, tasks_file)
+            write_tasks(all_tasks, tasks_file, archive_file=_get_archive_file())
         all_tasks = read_tasks(tasks_file)
-    tasks_list   = [t for t in all_tasks if t.section != "Archive"]
-    archive_list = [t for t in all_tasks if t.section == "Archive"]
+    # Completed history lives in archive.md and is fetched on demand by
+    # /tasks/archive, so it is deliberately not loaded or rendered here — it
+    # used to be emitted into every page as hidden rows, twice (table + cards),
+    # which made page weight grow without bound as the archive grew.
+    tasks_list = [t for t in all_tasks if t.section != "Archive"]
     prefs      = UserStore.get_prefs(g.user["id"])
     tasks_list = sort_tasks(tasks_list, prefs)
     # Pre-compute group headers server-side so they render in the initial
@@ -671,11 +697,35 @@ def tasks():
         tasks_list, prefs.get("sort_col", "due"), prefs.get("sort_dir", "asc"),
         date.today().isoformat())
     return render_template("tasks_view.html", tasks=tasks_list,
-                           archive_tasks=archive_list,
                            prefs=prefs,
                            group_headers=group_headers,
                            all_contexts=get_all_contexts(tasks_file),
                            all_projects=get_all_projects(tasks_file))
+
+
+@app.route("/tasks/archive")
+@require_login
+def tasks_archive():
+    """Completed history, fetched on demand by the 'Show completed' toggle.
+
+    Newest first: archive.md is append-ordered (oldest first) because appending
+    is what keeps completion cheap, so the ordering is applied here instead.
+    """
+    archived = read_tasks(_get_archive_file())
+    archived.sort(key=lambda t: (t.tags.get("#done") or "", t.description or ""),
+                  reverse=True)
+    return {"ok": True, "tasks": [{
+        "id":           t.id,
+        "content_hash": t.content_hash,
+        "description":  t.description,
+        "due":          t.due,
+        "priority":     t.priority,
+        "context":      t.context,
+        "recurrence":   t.recurrence,
+        "start":        t.start,
+        "notes":        t.notes,
+        "done":         t.tags.get("#done"),
+    } for t in archived]}
 
 
 @app.route("/tasks/print")
@@ -734,16 +784,18 @@ def tasks_toggle():
     if task_id is None or action not in ("complete", "reopen"):
         return {"error": "bad request"}, 400
     with get_user_lock(g.user["id"]):
-        tasks_file = _get_tasks_file()
-        tasks_list = read_tasks(tasks_file)
-        task = _find_task_by_id(tasks_list, str(task_id))
+        task, task_list, in_archive = _load_for_edit(str(task_id))
         if task is None:
             return {"ok": False}
         if action == "complete":
             task.complete_task()
         else:
             task.reopen_task()
-        write_tasks(tasks_list, tasks_file)
+        if in_archive:
+            write_archive(task_list, _get_archive_file(), _get_tasks_file())
+        else:
+            write_tasks(task_list, _get_tasks_file(),
+                        archive_file=_get_archive_file())
         return {"ok": True}
 
 
@@ -820,8 +872,7 @@ def tasks_update():
 
     with get_user_lock(g.user["id"]):
         tasks_file = _get_tasks_file()
-        tasks_list = read_tasks(tasks_file)
-        task = _find_task_by_id(tasks_list, str(task_id))
+        task, tasks_list, in_archive = _load_for_edit(str(task_id))
         if task is None:
             return {"error": "task not found"}, 404
 
@@ -866,7 +917,18 @@ def tasks_update():
             extra.append(next_task.to_line())
             if next_task.raw_notes.strip():
                 extra.extend(next_task.raw_notes.split("\n"))
-        write_tasks(tasks_list, tasks_file, extra_lines=extra if extra else None)
+
+        if in_archive:
+            # Editing/reopening an already-archived task: rewrite archive.md,
+            # moving it back into tasks.md first if it's no longer complete.
+            write_archive(tasks_list, _get_archive_file(), tasks_file)
+            if extra:
+                from task_manager import append_to_tasks
+                append_to_tasks(extra, tasks_file)
+        else:
+            write_tasks(tasks_list, tasks_file,
+                        extra_lines=extra if extra else None,
+                        archive_file=_get_archive_file())
 
     result = {"ok": True, "new_hash": task.content_hash}
     if next_task:
@@ -900,39 +962,56 @@ def tasks_bulk_update():
     if not isinstance(task_hashes, dict):
         return {"error": "bad task_hashes"}, 400
 
+    if action not in ("delete", "set-priority", "set-context", "set-due", "set-project"):
+        return {"error": "unknown action"}, 400
+
     with get_user_lock(g.user["id"]):
-        tasks_file = _get_tasks_file()
-        tasks_list = read_tasks(tasks_file)
+        tasks_file   = _get_tasks_file()
+        archive_file = _get_archive_file()
+        tasks_list   = read_tasks(tasks_file)
+        wanted       = {str(tid) for tid in task_ids}
+
+        # Only parse archive.md when some target isn't among the active tasks —
+        # bulk actions on active tasks shouldn't pay for the whole history.
+        active_ids   = {t.id for t in tasks_list}
+        archive_list = read_tasks(archive_file) if (wanted - active_ids) else None
+
+        def _apply(task):
+            if action == "set-priority":
+                task.set_priority(value if value else None)
+            elif action == "set-context":
+                task.set_context(value if value else None)
+            elif action == "set-due":
+                task.set_due(value if value else None)
+            elif action == "set-project":
+                task.set_project(value if value else None)
 
         # Optimistic concurrency: verify all affected tasks haven't changed.
         if task_hashes:
             for task_id in task_ids:
-                task = _find_task_by_id(tasks_list, str(task_id))
+                task = (_find_task_by_id(tasks_list, str(task_id))
+                        or (_find_task_by_id(archive_list, str(task_id))
+                            if archive_list else None))
                 expected = task_hashes.get(str(task_id))
                 if task and expected and task.content_hash != expected:
                     return {"error": "conflict",
                             "message": "One or more tasks changed — please refresh."}, 409
 
         if action == "delete":
-            delete_ids = set(str(tid) for tid in task_ids)
-            tasks_list = [t for t in tasks_list if t.id not in delete_ids]
+            tasks_list = [t for t in tasks_list if t.id not in wanted]
+            if archive_list is not None:
+                archive_list = [t for t in archive_list if t.id not in wanted]
         else:
             for task_id in task_ids:
                 task = _find_task_by_id(tasks_list, str(task_id))
-                if task is None:
-                    continue
-                if action == "set-priority":
-                    task.set_priority(value if value else None)
-                elif action == "set-context":
-                    task.set_context(value if value else None)
-                elif action == "set-due":
-                    task.set_due(value if value else None)
-                elif action == "set-project":
-                    task.set_project(value if value else None)
-                else:
-                    return {"error": "unknown action"}, 400
+                if task is None and archive_list:
+                    task = _find_task_by_id(archive_list, str(task_id))
+                if task is not None:
+                    _apply(task)
 
-        write_tasks(tasks_list, tasks_file)
+        if archive_list is not None:
+            write_archive(archive_list, archive_file, tasks_file)
+        write_tasks(tasks_list, tasks_file, archive_file=archive_file)
     return {"ok": True}
 
 

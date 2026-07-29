@@ -18,7 +18,9 @@ python3 src/tasks.py --file data/<uuid>/tasks.md  # CLI filter by path
 
 **`src/serve.py`** — Flask web server. Routes: `/tasks*` (task CRUD), `/auth/*` (login/logout/register/reset), `/settings`, `/admin`. Uses ProxyFix when `https: true`.
 
-**`src/task_manager.py`** — Task parsing, reading, and writing. The `Task` class and `read_tasks(tasks_file)`/`write_tasks(tasks, tasks_file, extra_lines=None)` functions. Also handles recurrence.
+**`src/task_manager.py`** — Task parsing, reading, and writing. The `Task` class and `read_tasks(tasks_file)`/`write_tasks(tasks, tasks_file, extra_lines=None, archive_file=None)` functions. Also handles recurrence and group headers (`compute_group_headers`, mirroring the JS grouping so headers render server-side).
+
+**Active vs archived.** Active tasks live in `tasks.md`; completed ones are moved to `archive.md`. Completing a task is an *append* to `archive.md` (`append_to_archive`), so its cost doesn't grow with history and routine edits never rewrite it. Only reopen/edit/delete of an already-archived task rewrites the archive (`write_archive`, which moves no-longer-complete tasks back into `tasks.md` first). Rule when moving a task between the two files: **write the destination before the source**, so an interruption leaves a recoverable duplicate rather than losing data. The main page never loads or renders the archive — the "Show completed" toggle fetches `/tasks/archive` on demand. A legacy `## Archive` section inside `tasks.md` is folded out automatically on the next write; `src/migrate_archive.py` does it eagerly (with a backup).
 
 **`src/user_store.py`** — Multi-user auth. `UserStore` class handles registration, login, email verification, password reset, and admin functions. Users stored in `data/{uuid}/`.
 
@@ -55,7 +57,8 @@ data/
   {uuid}/
     profile.json            # auth fields (password hash, tokens, suspend/admin flags)
     preferences.json        # display preferences (theme, sort, etc.)
-    tasks.md                # user's tasks in markdown
+    tasks.md                # user's ACTIVE tasks in markdown
+    archive.md              # completed tasks (append-only; fetched on demand)
     .{uuid}.lock            # flock sidecar for this user
   .secret                   # auto-generated Flask session secret (chmod 0o600)
 ```
