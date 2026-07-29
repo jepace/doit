@@ -67,6 +67,70 @@ class TestAuthenticate:
         assert "verify" in err.lower()
 
 
+class TestNoAccountEnumeration:
+    """Account state must only be disclosed once the password is verified,
+    otherwise the login form becomes an account-existence oracle."""
+
+    def test_wrong_password_is_generic_for_every_account_state(self, store, tmp_path):
+        data_dir = tmp_path / "data"
+        verified = _make_verified_user(data_dir, email="v@example.com",
+                                       password="verifiedpass1")
+        store.create_user("u@example.com", "unverifiedpass1")          # unverified
+        susp = _make_verified_user(data_dir, email="s@example.com",
+                                   password="susppass1234")
+        store.suspend_user(susp["id"], True)
+
+        errors = set()
+        for email in ["v@example.com", "u@example.com", "s@example.com",
+                      "ghost@example.com"]:
+            u, err = store.authenticate(email, "wrong-password")
+            assert u is None
+            errors.add(err)
+        # One identical message regardless of whether the account exists,
+        # is unverified, or is suspended.
+        assert errors == {store.GENERIC_AUTH_ERROR}
+
+    def test_locked_account_is_generic_on_wrong_password(self, store, user):
+        for _ in range(5):
+            store.record_failed_login(user["id"])
+        assert store.is_locked(user["id"])
+        u, err = store.authenticate(TEST_EMAIL, "wrong-password")
+        assert u is None
+        assert err == store.GENERIC_AUTH_ERROR      # not "locked"
+
+    def test_locked_account_is_disclosed_on_correct_password(self, store, user):
+        for _ in range(5):
+            store.record_failed_login(user["id"])
+        u, err = store.authenticate(TEST_EMAIL, TEST_PASSWORD)
+        assert u is None
+        assert "locked" in err.lower()              # owner may be told
+
+    def test_failed_attempts_on_locked_account_do_not_extend_the_lock(self, store, user):
+        import user_store as us
+        for _ in range(5):
+            store.record_failed_login(user["id"])
+        before = us._read_json(us._profile_path(user["id"]))["failed_logins"]
+        store.authenticate(TEST_EMAIL, "wrong-password")
+        after = us._read_json(us._profile_path(user["id"]))["failed_logins"]
+        assert after == before
+
+    def test_duplicate_registration_raises_distinguishable_type(self, store, user):
+        import user_store as us
+        # A dedicated type so the web layer can suppress this one message while
+        # still surfacing genuine input errors.
+        with pytest.raises(us.EmailTakenError):
+            store.create_user(TEST_EMAIL, "anotherpassword1")
+        assert issubclass(us.EmailTakenError, ValueError)
+
+    def test_input_validation_errors_are_not_email_taken(self, store):
+        import user_store as us
+        for email, pw in [("not-an-email", "goodpassword1"),
+                          ("fine@example.com", "short")]:
+            with pytest.raises(ValueError) as ei:
+                store.create_user(email, pw)
+            assert not isinstance(ei.value, us.EmailTakenError)
+
+
 # ---------------------------------------------------------------------------
 # Token index — O(1) lookup, no reuse (H4)
 # ---------------------------------------------------------------------------

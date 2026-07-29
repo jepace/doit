@@ -33,8 +33,10 @@ from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
                           get_all_projects, get_tasks_file, DATA_DIR,
                           _write_text_atomic, sort_tasks, compute_group_headers)
-from user_store import UserStore, get_user_lock, is_valid_user_id
-from mailer import send_verification_email, send_reset_email
+from user_store import (UserStore, get_user_lock, is_valid_user_id,
+                        EmailTakenError)
+from mailer import (send_verification_email, send_reset_email,
+                    send_account_exists_email)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -346,7 +348,19 @@ def register():
                     log.info("register: new account %s from %s", email, _ip())
                     session["pending_email"] = email
                     return redirect(url_for("verify_pending"))
+                except EmailTakenError:
+                    # Don't confirm that the address is registered — that would
+                    # make this form an account-existence oracle. Respond exactly
+                    # as we do on success and notify the real owner by email
+                    # instead, so they aren't left waiting for a mail that a
+                    # silent no-op would never send.
+                    log.info("register: duplicate email attempt for %s from %s", email, _ip())
+                    send_account_exists_email(email, _base_url())
+                    session["pending_email"] = email
+                    return redirect(url_for("verify_pending"))
                 except ValueError as exc:
+                    # Malformed email / weak password — describes the submitted
+                    # input, not whether an account exists, so safe to echo.
                     log.warning("register: failed for %s from %s — %s", email, _ip(), exc)
                     error = str(exc)
     return render_template("register.html", error=error)

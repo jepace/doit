@@ -24,6 +24,16 @@ DATA_DIR  = REPO_ROOT / "data"
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+
+class EmailTakenError(ValueError):
+    """Raised when registering an address that already has an account.
+
+    Distinct from the other ValueErrors create_user() raises (malformed email,
+    weak password) because those describe the caller's own input and are safe
+    to echo back, whereas this one reveals that an account exists. Callers on
+    the public registration path must not surface it to the user.
+    """
+
 _VALID_THEMES    = {"light", "dark", "system"}
 _VALID_FONTSIZES = {"small", "medium", "large"}
 _VALID_SORT_COLS = {"due", "priority", "context", "description", "start"}
@@ -196,7 +206,7 @@ class UserStore:
         with _get_lock("email_index"):
             index = _load_email_index()
             if email in index:
-                raise ValueError("An account with that email already exists.")
+                raise EmailTakenError("An account with that email already exists.")
 
             # Grant admin to the bootstrap account only when there is genuinely
             # no admin yet. Keying off an empty email index alone is fragile: if
@@ -280,22 +290,44 @@ class UserStore:
 
     # ── Authentication ────────────────────────────────────────────────────
 
+    # Returned for every failure that must not confirm whether an account
+    # exists. Callers may compare against this to detect the generic case.
+    GENERIC_AUTH_ERROR = "Invalid email or password."
+
     @classmethod
     def authenticate(cls, email: str, password: str) -> tuple[dict | None, str]:
-        """Returns (user, "") on success or (None, error) on failure."""
+        """Returns (user, "") on success or (None, error) on failure.
+
+        Account state (suspended / locked / unverified) is only ever disclosed
+        *after* the password has been verified. Checking state first would turn
+        the login form into an account-existence oracle: an attacker could
+        submit any password and learn from the distinct message that the
+        address is registered. Once the password matches, the requester is the
+        account owner, so a specific message tells them nothing they don't
+        already know.
+        """
         user = cls.get_by_email(email)
         if user is None:
             check_password_hash(_DUMMY_HASH, password)  # equalize timing
-            return None, "Invalid email or password."
+            return None, cls.GENERIC_AUTH_ERROR
+
+        # Always spend the same work verifying the password, whatever state the
+        # account is in, so response timing doesn't leak existence either.
+        password_ok = check_password_hash(user["password_hash"], password)
+        locked = cls.is_locked(user["id"])
+
+        if not password_ok:
+            if not locked:
+                cls.record_failed_login(user["id"])
+            return None, cls.GENERIC_AUTH_ERROR
+
+        # Password is correct from here on — safe to be specific.
+        if locked:
+            return None, "Account temporarily locked. Try again later."
         if user.get("suspended"):
             return None, "This account has been suspended."
-        if cls.is_locked(user["id"]):
-            return None, "Account temporarily locked. Try again later."
         if not user.get("verified"):
             return None, "Please verify your email address before signing in."
-        if not check_password_hash(user["password_hash"], password):
-            cls.record_failed_login(user["id"])
-            return None, "Invalid email or password."
         cls.clear_failed_logins(user["id"])
         return user, ""
 

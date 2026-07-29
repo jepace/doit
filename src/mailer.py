@@ -88,6 +88,37 @@ def send_verification_email(email: str, token: str, base_url: str) -> bool:
     return send_email(email, subject, text_body, html_body)
 
 
+def send_account_exists_email(email: str, base_url: str) -> bool:
+    """Tell an existing account holder that someone tried to register with
+    their address.
+
+    The registration form deliberately shows the same "check your email"
+    response whether or not the address was already taken, so it can't be used
+    to enumerate accounts. This email is what keeps that honest for the real
+    owner: without it, re-registering would appear to succeed but no mail would
+    ever arrive.
+    """
+    base_url = base_url.rstrip("/")
+    subject = "You already have a doit account"
+    text_body = (
+        f"Someone (probably you) just tried to create a doit account with this "
+        f"email address, but an account already exists.\n\n"
+        f"Sign in here:\n{base_url}/auth/login\n\n"
+        f"Forgot your password?\n{base_url}/auth/forgot\n\n"
+        f"If this wasn't you, no action is needed — your account was not "
+        f"changed and no new account was created."
+    )
+    html_body = f"""<html><body>
+<p>Someone (probably you) just tried to create a doit account with this email
+address, but an account already exists.</p>
+<p><a href="{base_url}/auth/login">Sign in</a> &middot;
+   <a href="{base_url}/auth/forgot">Forgot your password?</a></p>
+<p>If this wasn't you, no action is needed — your account was not changed and
+no new account was created.</p>
+</body></html>"""
+    return send_email(email, subject, text_body, html_body)
+
+
 def send_reset_email(email: str, token: str, base_url: str) -> bool:
     """Send a password reset email."""
     base_url = base_url.rstrip("/")

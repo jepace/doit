@@ -621,6 +621,79 @@ class TestCsrfEnforcement:
 # Security — hardening regressions from the remote-attack-surface review
 # ---------------------------------------------------------------------------
 
+class TestRegistrationDoesNotEnumerate:
+    """POSTing an address that already has an account must be
+    indistinguishable from registering a brand-new one."""
+
+    def test_existing_and_new_email_get_identical_responses(self, client, monkeypatch):
+        import serve
+        sent = []
+        monkeypatch.setattr(serve, "send_verification_email",
+                            lambda *a, **k: sent.append(("verify", a[0])) or True)
+        monkeypatch.setattr(serve, "send_account_exists_email",
+                            lambda *a, **k: sent.append(("exists", a[0])) or True)
+        csrf = get_csrf(client)
+
+        def post(email):
+            serve._rate_limit.clear()
+            r = client.post("/register", data={
+                "email": email, "password": "somepassword1",
+                "confirm": "somepassword1", "_csrf_token": csrf})
+            return (r.status_code, r.headers.get("Location"), len(r.get_data()))
+
+        existing = post(TEST_EMAIL)             # already registered by fixture
+        fresh    = post("nobody-new@example.com")
+        assert existing == fresh
+        assert existing[0] == 302
+
+        # The real owner is still told what happened, out of band.
+        assert ("exists", TEST_EMAIL) in sent
+        assert ("verify", "nobody-new@example.com") in sent
+
+    def test_duplicate_registration_does_not_leak_in_body(self, client, monkeypatch):
+        import serve
+        monkeypatch.setattr(serve, "send_account_exists_email", lambda *a, **k: True)
+        csrf = get_csrf(client)
+        r = client.post("/register", data={
+            "email": TEST_EMAIL, "password": "somepassword1",
+            "confirm": "somepassword1", "_csrf_token": csrf},
+            follow_redirects=True)
+        assert b"already exists" not in r.data
+
+    def test_genuine_input_errors_are_still_reported(self, client):
+        csrf = get_csrf(client)
+        r = client.post("/register", data={
+            "email": "not-an-email", "password": "somepassword1",
+            "confirm": "somepassword1", "_csrf_token": csrf})
+        assert r.status_code == 200
+        assert b"Invalid email address" in r.data
+
+
+class TestLoginDoesNotEnumerate:
+    def test_wrong_password_responses_are_identical(self, client, tmp_path):
+        import serve, user_store as us
+        from conftest import _make_verified_user
+        data_dir = tmp_path / "data"
+        us.UserStore.create_user("unver@example.com", "unverpassword1")
+        susp = _make_verified_user(data_dir, email="susp@example.com",
+                                   password="susppassword1")
+        us.UserStore.suspend_user(susp["id"], True)
+        csrf = get_csrf(client)
+
+        prints = set()
+        for email in [TEST_EMAIL, "unver@example.com", "susp@example.com",
+                      "ghost@example.com"]:
+            serve._rate_limit.clear()
+            r = client.post("/auth/login", data={
+                "email": email, "password": "definitely-wrong",
+                "_csrf_token": csrf})
+            assert b"Invalid email or password" in r.data
+            for leak in [b"verify your email", b"suspended", b"locked"]:
+                assert leak not in r.data.lower(), (email, leak)
+            prints.add((r.status_code, r.headers.get("Location"), len(r.get_data())))
+        assert len(prints) == 1, prints
+
+
 class TestAdminUserIdTraversal:
     """A user_id from the URL reaches shutil.rmtree() via delete_user(), so a
     value like '..' must never resolve to a path outside DATA_DIR."""
