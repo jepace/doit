@@ -35,6 +35,14 @@
   <div class="admin-wrap">
     <a href="/" class="back-link">‹ Do It!</a>
     <h1>Users</h1>
+    {% set unverified_count = users | rejectattr('verified') | rejectattr('admin') | list | length %}
+    {% if unverified_count %}
+    <form method="post" action="/admin/users/bulk-delete-unverified?confirm=yes" style="margin-bottom:14px;"
+          onsubmit="return confirm('Delete all {{ unverified_count }} unverified account(s)? This cannot be undone. Verified accounts and admins are never touched.')">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-sm btn-danger">Delete All Unverified ({{ unverified_count }})</button>
+    </form>
+    {% endif %}
     {% if users %}
     <div class="card">
       <table>

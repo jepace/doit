@@ -42,6 +42,12 @@
       {% if error %}<div class="error">{{ error }}</div>{% endif %}
       <form method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <!-- Honeypot: invisible to humans, but bots that blindly fill every
+             field trip it. Real browsers never populate this. -->
+        <div style="position:absolute;left:-9999px;top:-9999px;" aria-hidden="true">
+          <label for="website">Website</label>
+          <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+        </div>
         <label for="email">Email</label>
         <input id="email" name="email" type="email" autocomplete="email" autofocus required>
         <label for="password">Password</label>

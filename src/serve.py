@@ -266,6 +266,13 @@ def register():
     error = None
     if request.method == "POST":
         ip = _ip()
+        if request.form.get("website"):
+            # Honeypot tripped — a bot filled in a field real browsers never
+            # see or populate. Pretend it worked so the bot doesn't adapt,
+            # but don't actually create anything.
+            log.info("register: honeypot tripped from %s", ip)
+            session["pending_email"] = request.form.get("email", "").strip()
+            return redirect(url_for("verify_pending"))
         if not _check_rate_limit(f"register:{ip}", 5, 3600):
             error = "Too many registration attempts. Please try again later."
         else:
@@ -922,6 +929,22 @@ def admin_delete(user_id):
             UserStore.delete_user(user_id)
             log.info("admin: %s deleted user %s", g.user["email"],
                      target["email"] if target else user_id)
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/bulk-delete-unverified", methods=["POST"])
+@require_admin
+def admin_bulk_delete_unverified():
+    """One-click cleanup for a batch of bot/scanner sign-ups: removes every
+    unverified, non-admin account. Verified accounts and admins are always
+    left alone, regardless of how this is called."""
+    if request.args.get("confirm") != "yes":
+        return redirect(url_for("admin_users"))
+    targets = [u for u in UserStore.list_users()
+               if not u.get("verified") and not u.get("admin") and u["id"] != g.user["id"]]
+    for u in targets:
+        UserStore.delete_user(u["id"])
+    log.info("admin: %s bulk-deleted %d unverified account(s)", g.user["email"], len(targets))
     return redirect(url_for("admin_users"))
 
 

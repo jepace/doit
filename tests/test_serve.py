@@ -83,6 +83,30 @@ class TestAuth:
         r = client.post("/register", data={"email": TEST_EMAIL, "password": TEST_PASSWORD, "confirm": TEST_PASSWORD, "_csrf_token": csrf})
         assert r.status_code in (200, 302)
 
+    def test_register_honeypot_silently_rejects(self, client):
+        import user_store as us
+        csrf = get_csrf(client)
+        r = client.post("/register", data={
+            "email": "bot@example.com", "password": "botpassword1",
+            "confirm": "botpassword1", "website": "http://spam.example",
+            "_csrf_token": csrf,
+        })
+        # Looks like success to the caller...
+        assert r.status_code == 302
+        # ...but no account was actually created.
+        assert us.UserStore.get_by_email("bot@example.com") is None
+
+    def test_register_without_honeypot_still_works(self, client):
+        import user_store as us
+        csrf = get_csrf(client)
+        r = client.post("/register", data={
+            "email": "human@example.com", "password": "humanpassword1",
+            "confirm": "humanpassword1", "website": "",
+            "_csrf_token": csrf,
+        })
+        assert r.status_code == 302
+        assert us.UserStore.get_by_email("human@example.com") is not None
+
 
 # ---------------------------------------------------------------------------
 # Two-factor auth
@@ -628,6 +652,60 @@ class TestIpAndSafeNext:
         import serve
         with serve.app.test_request_context("/"):
             assert serve._safe_next("/tasks") == "/tasks"
+
+
+# ---------------------------------------------------------------------------
+# Admin — bulk delete unverified (bot/scanner sign-up cleanup)
+# ---------------------------------------------------------------------------
+
+class TestAdminBulkDeleteUnverified:
+    def _admin_client(self, client, tmp_path):
+        """An authenticated session for an admin user, plus some other
+        accounts to exercise the bulk-delete against."""
+        import user_store as us
+        from conftest import _make_verified_user
+
+        data_dir = tmp_path / "data"
+        admin = _make_verified_user(data_dir, email="admin@example.com",
+                                     password="adminpassword1", admin=True)
+        with client.session_transaction() as sess:
+            sess["user_id"]    = admin["id"]
+            sess["csrf_token"] = "testcsrf"
+        from conftest import _AutoCsrfClient
+        return _AutoCsrfClient(client, "testcsrf"), admin
+
+    def test_deletes_only_unverified_non_admin(self, client, tmp_path):
+        import user_store as us
+        admin_client, admin = self._admin_client(client, tmp_path)
+
+        unverified = us.UserStore.create_user("bot1@example.com", "botpassword1")
+        us.UserStore.create_user("bot2@example.com", "botpassword1")
+        verified = us.UserStore.create_user("real@example.com", "realpassword1")
+        p = us._read_json(us._profile_path(verified["id"]))
+        p["verified"] = True
+        us._write_json(us._profile_path(verified["id"]), p)
+
+        r = admin_client.post("/admin/users/bulk-delete-unverified?confirm=yes",
+                              data={"_csrf_token": "testcsrf"})
+        assert r.status_code == 302
+
+        assert us.UserStore.get_user(unverified["id"]) is None
+        assert us.UserStore.get_user(verified["id"]) is not None   # untouched
+        assert us.UserStore.get_user(admin["id"]) is not None      # untouched
+
+    def test_requires_confirm_param(self, client, tmp_path):
+        import user_store as us
+        admin_client, admin = self._admin_client(client, tmp_path)
+        stray = us.UserStore.create_user("bot@example.com", "botpassword1")
+
+        r = admin_client.post("/admin/users/bulk-delete-unverified",
+                              data={"_csrf_token": "testcsrf"})
+        assert r.status_code == 302
+        assert us.UserStore.get_user(stray["id"]) is not None  # nothing deleted
+
+    def test_requires_admin(self, authed_client):
+        r = authed_client.post("/admin/users/bulk-delete-unverified?confirm=yes")
+        assert r.status_code in (302, 403)
 
 
 # ---------------------------------------------------------------------------
