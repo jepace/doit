@@ -71,7 +71,30 @@ def get_user_lock(user_id: str):
 # Path helpers
 # ---------------------------------------------------------------------------
 
+def is_valid_user_id(user_id: str) -> bool:
+    """True only for a canonical UUID string, the form create_user() issues.
+
+    Callers that take a user id from untrusted input (e.g. an admin URL path
+    segment) must gate on this before touching the filesystem.
+    """
+    if not isinstance(user_id, str):
+        return False
+    try:
+        return str(uuid.UUID(user_id)) == user_id.lower()
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 def _user_dir(user_id: str) -> Path:
+    # Low-level guard: a user id must never be able to escape DATA_DIR.
+    # Without this, an id of ".." resolves to DATA_DIR's parent, and
+    # delete_user()'s shutil.rmtree() would then wipe everything above the
+    # data directory. Kept looser than is_valid_user_id() so non-UUID ids
+    # (used by some tests/tooling) still work, but traversal cannot.
+    if (not isinstance(user_id, str) or not user_id
+            or user_id in (".", "..") or "/" in user_id or "\\" in user_id
+            or "\x00" in user_id):
+        raise ValueError(f"Unsafe user id: {user_id!r}")
     return DATA_DIR / user_id
 
 def _profile_path(user_id: str) -> Path:
@@ -175,7 +198,12 @@ class UserStore:
             if email in index:
                 raise ValueError("An account with that email already exists.")
 
-            is_first_user = len(index) == 0
+            # Grant admin to the bootstrap account only when there is genuinely
+            # no admin yet. Keying off an empty email index alone is fragile: if
+            # that file were lost or reset, the next registrant — plausibly a bot,
+            # since registration is open — would silently be made admin.
+            is_first_user = (len(index) == 0
+                             and not any(u.get("admin") for u in cls.list_users()))
 
             user_id = str(uuid.uuid4())
             user_dir = _user_dir(user_id)

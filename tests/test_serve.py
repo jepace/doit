@@ -618,10 +618,152 @@ class TestCsrfEnforcement:
 
 
 # ---------------------------------------------------------------------------
+# Security — hardening regressions from the remote-attack-surface review
+# ---------------------------------------------------------------------------
+
+class TestAdminUserIdTraversal:
+    """A user_id from the URL reaches shutil.rmtree() via delete_user(), so a
+    value like '..' must never resolve to a path outside DATA_DIR."""
+
+    def _admin(self, client, tmp_path):
+        from conftest import _make_verified_user, _AutoCsrfClient
+        admin = _make_verified_user(tmp_path / "data", email="admin@example.com",
+                                    password="adminpassword1", admin=True)
+        with client.session_transaction() as sess:
+            sess["user_id"] = admin["id"]; sess["csrf_token"] = "tc"
+        return _AutoCsrfClient(client, "tc"), admin
+
+    def test_dotdot_user_id_is_rejected(self, client, tmp_path):
+        import user_store as us
+        admin_client, _ = self._admin(client, tmp_path)
+        data_dir = tmp_path / "data"
+        canary = tmp_path / "canary.txt"
+        canary.write_text("keep")
+
+        r = admin_client.post("/admin/users/../delete?confirm=yes",
+                              data={"_csrf_token": "tc"})
+        assert r.status_code == 404
+        assert canary.exists()      # nothing outside DATA_DIR was touched
+        assert data_dir.exists()
+
+    def test_non_uuid_user_id_is_rejected(self, client, tmp_path):
+        admin_client, _ = self._admin(client, tmp_path)
+        for probe in ["notauuid", "../../etc", "."]:
+            r = admin_client.post(f"/admin/users/{probe}/suspend",
+                                  data={"_csrf_token": "tc"})
+            assert r.status_code == 404, probe
+
+    def test_user_dir_rejects_traversal(self):
+        import user_store as us
+        for bad in ["..", ".", "a/b", "a\\b", ""]:
+            with pytest.raises(ValueError):
+                us._user_dir(bad)
+
+    def test_is_valid_user_id(self):
+        import user_store as us
+        assert us.is_valid_user_id("45e23980-168a-45ed-a08c-4e64c7a21005")
+        for bad in ["..", "notauuid", "", None, "45e23980168a45eda08c4e64c7a21005/x"]:
+            assert not us.is_valid_user_id(bad)
+
+
+class TestTaskTextSanitisation:
+    """tasks.md is line-oriented, so no field may smuggle in a newline and
+    forge extra task lines or a '## Archive' section header."""
+
+    def test_newline_in_task_text_cannot_forge_a_task(self, authed_client):
+        import user_store as us
+        from task_manager import read_tasks
+        before = len(read_tasks(us._user_dir(
+            us.UserStore.get_by_email(TEST_EMAIL)["id"]) / "tasks.md"))
+
+        r = authed_client.post("/tasks/add", data=json.dumps(
+            {"text": "benign\n- [ ] FORGED #id:deadbe\n## Archive"}),
+            content_type="application/json")
+        assert r.status_code == 200
+
+        tasks = read_tasks(us._user_dir(
+            us.UserStore.get_by_email(TEST_EMAIL)["id"]) / "tasks.md")
+        assert len(tasks) == before + 1          # exactly one task added
+        assert not any(t.description == "FORGED" for t in tasks)
+
+    def test_newline_in_description_update_is_flattened(self, authed_client):
+        import user_store as us
+        from task_manager import read_tasks
+        tid = _task_id(authed_client, 0)
+        authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": tid, "field": "description",
+             "value": "one\n- [ ] TWO #id:beef01"}),
+            content_type="application/json")
+        tasks = read_tasks(us._user_dir(
+            us.UserStore.get_by_email(TEST_EMAIL)["id"]) / "tasks.md")
+        assert not any(t.description == "TWO" for t in tasks)
+
+    def test_multiline_notes_are_still_allowed(self, authed_client):
+        """Notes are legitimately multi-line — only single-line fields are flattened."""
+        tid = _task_id(authed_client, 0)
+        r = authed_client.post("/tasks/update", data=json.dumps(
+            {"task_id": tid, "field": "notes", "value": "line one\nline two"}),
+            content_type="application/json")
+        assert r.status_code == 200
+        r2 = authed_client.get("/")
+        assert b"line two" in r2.data
+
+
+class TestRequestLimitsAndHeaders:
+    def test_oversized_body_is_rejected(self, authed_client):
+        r = authed_client.post("/tasks/add",
+                               data=json.dumps({"text": "A" * (2 * 1024 * 1024)}),
+                               content_type="application/json")
+        assert r.status_code == 413
+
+    def test_security_headers_present(self, client):
+        r = client.get("/auth/login")
+        assert r.headers["X-Content-Type-Options"] == "nosniff"
+        assert r.headers["X-Frame-Options"] == "DENY"
+        assert "default-src 'self'" in r.headers["Content-Security-Policy"]
+        assert r.headers["Referrer-Policy"] == "same-origin"
+
+
+class TestTwoFactorBruteForce:
+    def test_2fa_attempts_are_rate_limited(self, client, tmp_path):
+        import pyotp, serve, user_store as us
+        serve._rate_limit.clear()
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        us.UserStore.enable_totp(user["id"], pyotp.random_base32())
+        with client.session_transaction() as sess:
+            sess["pending_2fa_user_id"] = user["id"]
+            sess["csrf_token"] = "tc"
+
+        codes = [f"{n:06d}" for n in range(15)]
+        statuses = [client.post("/auth/2fa", data={"code": c, "_csrf_token": "tc"}).status_code
+                    for c in codes]
+        assert all(s == 200 for s in statuses)   # never redirects (never accepted)
+        # After the per-account cap (10/5min) the view short-circuits.
+        last = client.post("/auth/2fa", data={"code": "999999", "_csrf_token": "tc"})
+        assert b"Too many attempts" in last.data
+        serve._rate_limit.clear()
+
+
+class TestTotpSecretNotAttackerSupplied:
+    def test_query_param_secret_is_ignored(self, authed_client):
+        r = authed_client.get("/auth/2fa/setup?secret=ATTACKERSUPPLIEDSECRETAAA")
+        assert r.status_code == 200
+        assert b"ATTACKERSUPPLIEDSECRETAAA" not in r.data
+
+
+# ---------------------------------------------------------------------------
 # Security — _ip() and _safe_next (H2, L3)
 # ---------------------------------------------------------------------------
 
 class TestIpAndSafeNext:
+    def test_safe_next_rejects_leading_backslashes(self):
+        """Browsers normalise '\\' to '/', so these are protocol-relative."""
+        import serve
+        with serve.app.test_request_context("/"):
+            assert serve._safe_next("\\\\evil.com") == "/"
+            assert serve._safe_next("\\/evil.com") == "/"
+            assert serve._safe_next("/tasks\\evil") == "/"
+
     def test_ip_ignores_x_forwarded_for_without_proxy(self, client):
         """H2: X-Forwarded-For must not be trusted when ProxyFix is inactive."""
         import serve

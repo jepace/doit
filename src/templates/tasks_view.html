@@ -1541,7 +1541,11 @@ function makeGroupHeaderEl(cls, label) {
   const tr = document.createElement('tr');
   tr.className = `group-header-row ${cls}`;
   tr.dataset.grplabel = label;
-  tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> ${label} <span class="grp-count"></span></label></td>`;
+  // label is user data when grouping by context (it's the #ctx value), so it
+  // goes in via textContent — interpolating it into innerHTML would execute
+  // markup stored in a task tag.
+  tr.innerHTML = `<td colspan="9"><label style="cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" class="grp-select-all" autocomplete="off"> <span class="grp-label"></span> <span class="grp-count"></span></label></td>`;
+  tr.querySelector('.grp-label').textContent = label;
   wireGrpSelectAll(tr.querySelector('.grp-select-all'));
   return tr;
 }
@@ -1781,7 +1785,10 @@ function buildCardGroups(skipReorder) {
       hdr = document.createElement('div');
       hdr.className = `card-group-hdr ${cls}`;
       hdr.dataset.grplabel = label;
-      hdr.innerHTML = `${label} <span class="card-group-count"></span>`;
+      // textContent for the label — see makeGroupHeaderEl(); when grouping by
+      // context this is a user-supplied #ctx value.
+      hdr.innerHTML = `<span class="grp-label"></span> <span class="card-group-count"></span>`;
+      hdr.querySelector('.grp-label').textContent = label;
     } else {
       hdr.className = `card-group-hdr ${cls}`;
     }

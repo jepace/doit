@@ -33,7 +33,7 @@ from config import cfg_get, cfg_bool, cfg_int
 from task_manager import (read_tasks, write_tasks, get_all_contexts,
                           get_all_projects, get_tasks_file, DATA_DIR,
                           _write_text_atomic, sort_tasks, compute_group_headers)
-from user_store import UserStore, get_user_lock
+from user_store import UserStore, get_user_lock, is_valid_user_id
 from mailer import send_verification_email, send_reset_email
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -91,7 +91,17 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=cfg_bool("server", "https"),
     PERMANENT_SESSION_LIFETIME=timedelta(days=cfg_int("server", "session_days", 30)),
+    # Cap request bodies. Without this a single authenticated request could
+    # write an arbitrarily large task straight into the user's tasks.md and
+    # exhaust disk — reachable by anyone, since registration is open.
+    MAX_CONTENT_LENGTH=cfg_int("server", "max_request_bytes", 1_048_576),
 )
+
+# Per-field caps applied on top of MAX_CONTENT_LENGTH.
+MAX_TASK_TEXT  = 2_000     # a single task line (description + inline tags)
+MAX_NOTES_LEN  = 20_000    # a task's note body (legitimately multi-line)
+MAX_FIELD_LEN  = 500       # due/context/priority/etc. single-value fields
+MAX_BULK_IDS   = 500       # task_ids accepted in one bulk-update call
 
 if cfg_bool("server", "https"):
     # Trust X-Forwarded-For / X-Forwarded-Proto from a single reverse proxy
@@ -179,14 +189,45 @@ def _base_url() -> str:
 
 
 def _safe_next(url: str) -> str:
-    """Return url only if it's a safe relative path, otherwise the home page."""
+    """Return url only if it's a safe same-site relative path, else the home page.
+
+    Must start with a single '/' and contain no backslashes: browsers normalise
+    '\\' to '/', so values like '\\\\evil.com' or '/\\evil.com' would otherwise
+    be treated as protocol-relative URLs and redirect off-site.
+    """
     from urllib.parse import urlparse
-    if not url or url.startswith("//") or url.startswith("/\\"):
+    if not url or not url.startswith("/") or url.startswith("//"):
+        return url_for("tasks")
+    if "\\" in url or "\x00" in url:
         return url_for("tasks")
     parsed = urlparse(url)
     if parsed.scheme or parsed.netloc:
         return url_for("tasks")
     return url
+
+
+@app.after_request
+def security_headers(resp):
+    """Baseline hardening headers. The UI uses inline <script>/<style> blocks,
+    so the CSP allows 'unsafe-inline' for those but still pins every other
+    source to 'self' and blocks framing and plugin/base-tag tricks."""
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Referrer-Policy", "same-origin")
+    resp.headers.setdefault("Content-Security-Policy", "; ".join([
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data:",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "object-src 'none'",
+    ]))
+    if cfg_bool("server", "https"):
+        resp.headers.setdefault("Strict-Transport-Security",
+                                "max-age=31536000; includeSubDomains")
+    return resp
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +279,13 @@ def require_admin(f):
             return redirect(url_for("auth_login"))
         if not g.user.get("admin"):
             abort(403)
+        # Any user_id taken from the URL is untrusted input that ends up in
+        # filesystem paths (delete_user() calls shutil.rmtree on it), so
+        # reject anything that isn't a canonical UUID before the view runs.
+        target_id = kwargs.get("user_id")
+        if target_id is not None and not is_valid_user_id(target_id):
+            log.warning("admin: rejected malformed user_id %r from %s", target_id, _ip())
+            abort(404)
         return f(*args, **kwargs)
     return decorated
 
@@ -388,6 +436,14 @@ def auth_2fa():
         return redirect(url_for("auth_login"))
     error = None
     if request.method == "POST":
+        # A TOTP code is only 6 digits and pyotp accepts a +/-1 step window,
+        # so without a limit an attacker holding a stolen password could grind
+        # the code space. Throttle per-account and per-IP.
+        if (not _check_rate_limit(f"2fa:{user_id}", 10, 300)
+                or not _check_rate_limit(f"2fa:{_ip()}", 20, 300)):
+            log.warning("2fa: rate limit hit for user %s from %s", user_id, _ip())
+            return render_template(
+                "2fa.html", error="Too many attempts. Please wait and try again.")
         code = request.form.get("code", "").strip()
         if UserStore.verify_totp(user_id, code):
             next_url = session.get("pending_2fa_next") or url_for("tasks")
@@ -396,6 +452,7 @@ def auth_2fa():
             session["user_id"] = user_id
             session["csrf_token"] = secrets.token_hex(32)
             return redirect(next_url)
+        log.warning("2fa: invalid code for user %s from %s", user_id, _ip())
         error = "Invalid code — try again."
     return render_template("2fa.html", error=error)
 
@@ -406,12 +463,21 @@ def auth_2fa_setup():
     import pyotp
     user = g.user
     error = None
-    secret = request.form.get("secret") or request.args.get("secret") or UserStore.generate_totp_secret()
+    # The secret is generated server-side and held in the session for the
+    # duration of enrollment. It must NOT be taken from the request: a link
+    # like /auth/2fa/setup?secret=<attacker's secret> would otherwise let an
+    # attacker enroll a shared secret they also hold, so the victim's "second
+    # factor" would no longer be exclusively theirs.
+    secret = session.get("pending_totp_secret")
+    if not secret:
+        secret = UserStore.generate_totp_secret()
+        session["pending_totp_secret"] = secret
     if request.method == "POST":
         code = request.form.get("code", "").strip()
         totp = pyotp.TOTP(secret)
         if totp.verify(code.replace(" ", ""), valid_window=1):
             UserStore.enable_totp(user["id"], secret)
+            session.pop("pending_totp_secret", None)
             log.info("2fa: enabled for %s", user["email"])
             return redirect(url_for("settings") + "?2fa=enabled")
         error = "Code didn't match — please try again."
@@ -500,6 +566,32 @@ def _get_tasks_file():
 def _find_task_by_id(tasks_list: list, task_id: str):
     """Look up a task by its stable #id tag."""
     return next((t for t in tasks_list if t.id == task_id), None)
+
+
+def _clean_line(value: str, limit: int = MAX_TASK_TEXT) -> str:
+    """Collapse a value to a single trimmed, length-capped line.
+
+    tasks.md is line-oriented: a newline inside a task description would let
+    the caller forge extra task lines or a bogus '## Archive' section header
+    on write, corrupting the structure of their own file. Control characters
+    are dropped for the same reason.
+    """
+    if not isinstance(value, str):
+        return ""
+    value = value.replace("\r", " ").replace("\n", " ")
+    value = "".join(ch for ch in value if ch == "\t" or ord(ch) >= 0x20)
+    return value.strip()[:limit]
+
+
+def _clean_notes(value: str, limit: int = MAX_NOTES_LEN) -> str:
+    """Cap a note body. Newlines are preserved — notes are legitimately
+    multi-line and write_tasks() indents every note line, so they can't be
+    mistaken for task lines or section headers when read back."""
+    if not isinstance(value, str):
+        return ""
+    value = value.replace("\r\n", "\n").replace("\r", "\n")
+    value = "".join(ch for ch in value if ch in "\n\t" or ord(ch) >= 0x20)
+    return value[:limit]
 
 
 def _add_task(text: str, section: str = "Inbox") -> None:
@@ -645,8 +737,8 @@ def tasks_toggle():
 @require_login
 def tasks_add():
     data    = request.get_json(silent=True) or {}
-    text    = (data.get("text")    or "").strip()
-    section = (data.get("section") or "Inbox").strip()
+    text    = _clean_line(data.get("text") or "")
+    section = _clean_line(data.get("section") or "Inbox", MAX_FIELD_LEN) or "Inbox"
     if not text:
         return {"error": "Empty task"}, 400
     with get_user_lock(g.user["id"]):
@@ -666,14 +758,17 @@ def api_quick_add():
 
     data = request.get_json(silent=True) or {}
 
+    # Accepted from the Authorization header or the request body only — never
+    # the query string, which would leak the token into proxy/access logs and
+    # browser history.
     auth  = request.headers.get("Authorization", "")
     token = auth[7:].strip() if auth.startswith("Bearer ") else (
-        data.get("token") or request.form.get("token") or request.args.get("token") or "")
+        data.get("token") or request.form.get("token") or "")
     user = UserStore.get_user_by_api_token(token)
     if not user:
         return {"error": "Invalid or missing token"}, 401
 
-    text = (data.get("text") or request.form.get("text") or request.args.get("text") or "").strip()
+    text = _clean_line(data.get("text") or request.form.get("text") or "")
     if not text:
         return {"error": "Empty task"}, 400
 
@@ -693,11 +788,21 @@ def tasks_update():
     data      = request.get_json(silent=True) or {}
     task_id   = data.get("task_id")
     field     = data.get("field")
-    value     = data.get("value", "").strip()
+    raw_value = data.get("value", "")
     task_hash = data.get("task_hash", "")
 
     if task_id is None or field is None:
         return {"error": "missing task_id or field"}, 400
+
+    # Notes keep their newlines (they're written as indented lines); every
+    # other field becomes a single capped line so it can't forge task lines
+    # or section headers inside tasks.md.
+    if field == "notes":
+        value = _clean_notes(raw_value)
+    elif field == "description":
+        value = _clean_line(raw_value)
+    else:
+        value = _clean_line(raw_value, MAX_FIELD_LEN)
 
     with get_user_lock(g.user["id"]):
         tasks_file = _get_tasks_file()
@@ -771,11 +876,15 @@ def tasks_bulk_update():
     data        = request.get_json(silent=True) or {}
     action      = data.get("action")
     task_ids    = data.get("task_ids", [])
-    value       = data.get("value", "").strip()
+    value       = _clean_line(data.get("value", ""), MAX_FIELD_LEN)
     task_hashes = data.get("task_hashes", {})  # {task_id (str): hash}
 
     if action is None:
         return {"error": "missing action"}, 400
+    if not isinstance(task_ids, list) or len(task_ids) > MAX_BULK_IDS:
+        return {"error": "bad task_ids"}, 400
+    if not isinstance(task_hashes, dict):
+        return {"error": "bad task_hashes"}, 400
 
     with get_user_lock(g.user["id"]):
         tasks_file = _get_tasks_file()
