@@ -261,6 +261,8 @@ def internal_error(exc):
 def register():
     if g.get("user"):
         return redirect(url_for("tasks"))
+    if not cfg_bool("server", "allow_registration", True):
+        return render_template("register.html", error=None, closed=True)
     error = None
     if request.method == "POST":
         ip = _ip()

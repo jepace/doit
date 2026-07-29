@@ -10,7 +10,9 @@
     "secret":      "",
     "_secret_help": "Flask session secret key — signs login cookies. Leave blank to auto-generate (saved to data/.secret). To set manually: python3 -c \"import secrets; print(secrets.token_hex(32))\"",
     "session_days": 30,
-    "_session_days_help": "How long a login session lasts before the cookie expires. Default 30 days."
+    "_session_days_help": "How long a login session lasts before the cookie expires. Default 30 days.",
+    "allow_registration": true,
+    "_allow_registration_help": "Whether /register accepts new sign-ups. Defaults to true. Set to false to close sign-ups (e.g. if you want to switch to invite-only) without touching any other code."
   },
   "email": {
     "resend_api_key": "",
