@@ -100,6 +100,10 @@
   .tasks-table tbody tr.task-row.row-even { background: var(--bg2); }
   .tasks-table .note-row { background: var(--bg2) !important; }
   .tasks-table tr.task-row:hover { background: var(--bg3) !important; }
+  .tasks-table tr.task-row.row-selected {
+    background: color-mix(in srgb, var(--accent) 16%, var(--bg)) !important;
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
 
   /* Priority left border */
   .pri-top    > td:first-child { border-left: 3px solid #ff3b30; }
@@ -205,6 +209,8 @@
     margin-right: 6px; }
   .bulk-date-overlay .cancel-btn { background: var(--bg3); color: var(--text); border: 1px solid var(--border);
     border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  .bulk-date-overlay .clear-btn { background: none; color: var(--danger); border: 1px solid var(--danger);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; margin-right: 6px; }
 
   /* ── Mobile / tablet-portrait card layout (≤900px) ───────── */
   .task-cards-list { display: none; }
@@ -1378,8 +1384,18 @@ const bulkDrop = document.getElementById('bulk-drop');
 function updateBulkBtn() {
   bulkBtn.style.display = document.querySelectorAll('.sel-cb:checked').length ? 'block' : 'none';
 }
-function wireSelCb(cb) { cb.addEventListener('change', updateBulkBtn); }
+function wireSelCb(cb) {
+  cb.addEventListener('change', () => {
+    cb.closest('.task-row')?.classList.toggle('row-selected', cb.checked);
+    updateBulkBtn();
+  });
+}
 document.querySelectorAll('.sel-cb').forEach(wireSelCb);
+// Browsers can restore checkbox state on reload before our JS runs, so sync
+// the highlight to whatever's actually checked once at load.
+document.querySelectorAll('.sel-cb:checked').forEach(cb => {
+  cb.closest('.task-row')?.classList.add('row-selected');
+});
 bulkBtn.addEventListener('click', () => bulkDrop.classList.toggle('open'));
 document.addEventListener('click', e => { if (!e.target.closest('.bulk-wrap')) bulkDrop.classList.remove('open'); });
 function collectBulkHashes(ids) {
@@ -1425,6 +1441,7 @@ document.querySelectorAll('.bulk-item').forEach(item => {
       ov.innerHTML = `<label>Set due date for ${ids.length} task(s)</label>`
         + `<input type="date" value="${today}">`
         + `<button class="apply-btn">Apply</button>`
+        + `<button class="clear-btn" title="Remove the due date from ${ids.length} task(s)">No date</button>`
         + `<button class="cancel-btn">Cancel</button>`;
       wrap.appendChild(ov);
       const inp = ov.querySelector('input');
@@ -1437,6 +1454,10 @@ document.querySelectorAll('.bulk-item').forEach(item => {
         await apiBulk('set-due', ids, val);
       };
       ov.querySelector('.apply-btn').addEventListener('click', submit);
+      ov.querySelector('.clear-btn').addEventListener('click', async () => {
+        ov.remove();
+        await apiBulk('set-due', ids, '');
+      });
       ov.querySelector('.cancel-btn').addEventListener('click', () => ov.remove());
       inp.addEventListener('keydown', e => {
         if (e.key === 'Enter') submit();
@@ -1573,7 +1594,10 @@ function wireGrpSelectAll(cb) {
     let node = this.closest('tr').nextElementSibling;
     while (node && !node.classList.contains('group-header-row')) {
       const sel = node.querySelector('.sel-cb');
-      if (sel) sel.checked = this.checked;
+      if (sel) {
+        sel.checked = this.checked;
+        node.classList.toggle('row-selected', this.checked);
+      }
       node = node.nextElementSibling;
     }
     updateBulkBtn();
