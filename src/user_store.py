@@ -39,6 +39,11 @@ _VALID_FONTSIZES = {"small", "medium", "large"}
 _VALID_SORT_COLS = {"due", "priority", "context", "description", "start"}
 _VALID_SORT_DIRS = {"asc", "desc"}
 
+# Permissions an agent token can carry. "delete" is separate from "write" so a
+# token can add/edit/complete tasks without being able to destroy them.
+AGENT_SCOPES = ("read", "write", "delete")
+MAX_AGENT_TOKENS = 20
+
 try:
     import fcntl as _fcntl
 
@@ -526,6 +531,119 @@ class UserStore:
         if not p or not secrets.compare_digest(p.get("api_token_hash") or "", h):
             return None
         return cls.get_user(user_id)
+
+    # ── Agent tokens (REST API + MCP) ─────────────────────────────────────
+    #
+    # A user can hold several named tokens, each limited to a set of scopes,
+    # so e.g. a read-only token for one assistant and a read/write token for
+    # another can be revoked independently. Only a SHA-256 of each token is
+    # stored; the plaintext is shown once at creation.
+
+    @classmethod
+    def create_agent_token(cls, user_id: str, name: str,
+                           scopes) -> tuple[str, dict] | tuple[None, None]:
+        scopes = sorted({s for s in scopes if s in AGENT_SCOPES})
+        name = (name or "").strip()[:60] or "Agent"
+        if not scopes:
+            raise ValueError("Pick at least one permission.")
+        plain = "doit_" + secrets.token_urlsafe(32)
+        h = _token_hash(plain)
+        record = {
+            "id":           secrets.token_hex(6),
+            "name":         name,
+            "hash":         h,
+            "scopes":       scopes,
+            "created_at":   _utcnow().isoformat(timespec="seconds"),
+            "last_used_at": None,
+        }
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return None, None
+            tokens = p.get("agent_tokens") or []
+            if len(tokens) >= MAX_AGENT_TOKENS:
+                raise ValueError(f"You can have at most {MAX_AGENT_TOKENS} tokens; revoke one first.")
+            tokens.append(record)
+            p["agent_tokens"] = tokens
+            _write_json(_profile_path(user_id), p)
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            idx[h] = user_id
+            _save_token_index(idx)
+        return plain, {k: v for k, v in record.items() if k != "hash"}
+
+    @classmethod
+    def list_agent_tokens(cls, user_id: str) -> list[dict]:
+        p = _read_json(_profile_path(user_id)) or {}
+        return [{k: v for k, v in t.items() if k != "hash"}
+                for t in p.get("agent_tokens") or []]
+
+    @classmethod
+    def revoke_agent_token(cls, user_id: str, token_id: str) -> bool:
+        removed = None
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return False
+            tokens = p.get("agent_tokens") or []
+            keep = [t for t in tokens if t.get("id") != token_id]
+            if len(keep) == len(tokens):
+                return False
+            removed = next(t for t in tokens if t.get("id") == token_id)
+            p["agent_tokens"] = keep
+            _write_json(_profile_path(user_id), p)
+        with _get_lock("token_index"):
+            idx = _load_token_index()
+            idx.pop(removed["hash"], None)
+            _save_token_index(idx)
+        return True
+
+    @classmethod
+    def authenticate_agent_token(cls, plain_token: str):
+        """Resolve a bearer token to (user, scopes, token_id), else (None, (), None).
+
+        Accepts agent tokens and, for backwards compatibility, the older
+        single Siri quick-add token (which is treated as write-only). Suspended
+        or unverified accounts are refused even with a valid token.
+        """
+        if not plain_token or len(plain_token) > 200:
+            return None, (), None
+        h = _token_hash(plain_token)
+        with _get_lock("token_index"):
+            user_id = _load_token_index().get(h)
+        if user_id is None or not is_valid_user_id(user_id):
+            return None, (), None
+        p = _read_json(_profile_path(user_id))
+        if not p or p.get("suspended") or not p.get("verified"):
+            return None, (), None
+
+        match = next((t for t in p.get("agent_tokens") or []
+                      if secrets.compare_digest(t.get("hash", ""), h)), None)
+        if match is not None:
+            cls._touch_agent_token(user_id, match["id"], match.get("last_used_at"))
+            return cls.get_user(user_id), tuple(match.get("scopes") or ()), match["id"]
+        if secrets.compare_digest(p.get("api_token_hash") or "", h):
+            return cls.get_user(user_id), ("write",), "quick-add"
+        return None, (), None
+
+    @classmethod
+    def _touch_agent_token(cls, user_id: str, token_id: str, last_used: str | None) -> None:
+        """Record last use, at most every 10 minutes, so an active agent doesn't
+        rewrite the profile on every request."""
+        now = _utcnow()
+        try:
+            if last_used and now - datetime.fromisoformat(last_used) < timedelta(minutes=10):
+                return
+        except ValueError:
+            pass
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if not p:
+                return
+            for t in p.get("agent_tokens") or []:
+                if t.get("id") == token_id:
+                    t["last_used_at"] = now.isoformat(timespec="seconds")
+            _write_json(_profile_path(user_id), p)
 
     # ── Preferences ───────────────────────────────────────────────────────
 

@@ -141,6 +141,12 @@ def validate_csrf() -> bool:
 def csrf_protect():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
+    # Bearer-token routes never consult the session cookie, so a cross-site
+    # request can't ride on the user's login — CSRF doesn't apply. Without this
+    # exemption, a client that happened to also hold a browser session (or a
+    # stray cookie) would be rejected for lacking a CSRF token it can't have.
+    if request.path.startswith(("/api/", "/mcp")):
+        return
     # No session = no authenticated user; let require_login handle the redirect.
     if not session.get("csrf_token"):
         return
@@ -632,20 +638,8 @@ def _clean_notes(value: str, limit: int = MAX_NOTES_LEN) -> str:
 
 
 def _add_task(text: str, section: str = "Inbox") -> None:
-    from task_manager import _new_id
-    tasks_file = _get_tasks_file()
-    if not tasks_file.exists():
-        tasks_file.parent.mkdir(parents=True, exist_ok=True)
-        tasks_file.write_text("# Tasks\n\n## Inbox\n\n", encoding="utf-8")
-    content = tasks_file.read_text(encoding="utf-8")
-    new_line = f"- [ ] {text} #id:{_new_id()}"
-    section_header = f"## {section}"
-    if section_header in content:
-        insert_pos = content.index(section_header) + len(section_header)
-        content = content[:insert_pos] + f"\n{new_line}" + content[insert_pos:]
-    else:
-        content = content.rstrip() + f"\n\n{section_header}\n\n{new_line}\n"
-    _write_text_atomic(tasks_file, content)
+    from task_manager import insert_task_line
+    insert_task_line(_get_tasks_file(), text, section)
 
 
 # ---------------------------------------------------------------------------
@@ -1087,9 +1081,32 @@ def settings():
             UserStore.revoke_api_token(user["id"])
             return redirect(url_for("settings", saved="1"))
 
+        elif action == "agent_token_create":
+            scopes = [s for s in ("read", "write", "delete") if request.form.get(f"scope_{s}")]
+            try:
+                plain, record = UserStore.create_agent_token(
+                    user["id"], request.form.get("token_name", ""), scopes)
+            except ValueError as e:
+                errors["agent"] = str(e)
+            else:
+                log.info("agent-token: %s created %s %s", user["email"], record["id"], scopes)
+                # Rendered (not redirected) so the plaintext is shown exactly once.
+                return render_template(
+                    "settings.html", user=user, prefs=UserStore.get_prefs(user["id"]),
+                    errors=errors, success=False, base_url=base_url,
+                    agent_tokens=UserStore.list_agent_tokens(user["id"]),
+                    new_agent_token=plain, new_agent_record=record)
+
+        elif action == "agent_token_revoke":
+            token_id = request.form.get("token_id", "")
+            if UserStore.revoke_agent_token(user["id"], token_id):
+                log.info("agent-token: %s revoked %s", user["email"], token_id)
+            return redirect(url_for("settings", saved="1") + "#agents")
+
     prefs = UserStore.get_prefs(user["id"])
     return render_template("settings.html", user=user, prefs=prefs,
-                           errors=errors, success=success, base_url=base_url)
+                           errors=errors, success=success, base_url=base_url,
+                           agent_tokens=UserStore.list_agent_tokens(user["id"]))
 
 
 @app.route("/admin")
@@ -1176,6 +1193,14 @@ def admin_resend_verify(user_id):
         if not ok:
             log.error("admin: resend-verify email failed for %s (user %s)", user["email"], user_id)
     return redirect(url_for("admin_users"))
+
+
+# ---------------------------------------------------------------------------
+# AI agent access: REST API (/api/v1) + MCP server (/mcp) — see agent_api.py
+# ---------------------------------------------------------------------------
+
+from agent_api import bp as agent_api_bp  # noqa: E402
+app.register_blueprint(agent_api_bp)
 
 
 # ---------------------------------------------------------------------------

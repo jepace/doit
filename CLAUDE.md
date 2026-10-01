@@ -22,6 +22,10 @@ python3 src/tasks.py --file data/<uuid>/tasks.md  # CLI filter by path
 
 **Active vs archived.** Active tasks live in `tasks.md`; completed ones are moved to `archive.md`. Completing a task is an *append* to `archive.md` (`append_to_archive`), so its cost doesn't grow with history and routine edits never rewrite it. Only reopen/edit/delete of an already-archived task rewrites the archive (`write_archive`, which moves no-longer-complete tasks back into `tasks.md` first). Rule when moving a task between the two files: **write the destination before the source**, so an interruption leaves a recoverable duplicate rather than losing data. The main page never loads or renders the archive — the "Show completed" toggle fetches `/tasks/archive` on demand. A legacy `## Archive` section inside `tasks.md` is folded out automatically on the next write; `src/migrate_archive.py` does it eagerly (with a backup).
 
+**`src/task_api.py`** — Task operations for programmatic clients (validation, list/add/update/complete/reopen/delete), keyed by explicit `user_id`. Shared by both agent front ends so they can't drift.
+
+**`src/agent_api.py`** — Flask blueprint: REST API under `/api/v1` and an MCP server at `/mcp` (stateless Streamable HTTP, JSON-RPC). Bearer-token auth with per-token scopes (read/write/delete); never uses the session cookie, so it's exempt from the CSRF check. See `docs/agents.md`.
+
 **`src/user_store.py`** — Multi-user auth. `UserStore` class handles registration, login, email verification, password reset, and admin functions. Users stored in `data/{uuid}/`.
 
 **`src/mailer.py`** — Email sending via Resend API. Used for verification and password reset emails.

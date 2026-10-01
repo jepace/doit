@@ -279,6 +279,96 @@
     </div>
   </div>
 
+  <!-- ── AI agents (MCP + REST API) ─────────────────── -->
+  <div class="section" id="agents" style="margin-top:24px;">
+    <h2>AI Agents (Claude, Gemini, …)</h2>
+    <p style="font-size:14px;color:var(--text2);margin-bottom:14px;">
+      Let an AI assistant read and manage your list. Each token is separate and
+      can be revoked on its own — make one per assistant. Give an agent only the
+      permissions it needs; <strong>delete</strong> is off by default.
+    </p>
+    {% if errors.agent %}<div class="error">{{ errors.agent }}</div>{% endif %}
+
+    {% if new_agent_token %}
+      <div class="success-banner" style="margin-bottom:10px;">
+        Token “{{ new_agent_record.name }}” created — copy it now, it won't be shown again:
+      </div>
+      <div class="field">
+        <input type="text" readonly value="{{ new_agent_token }}" onclick="this.select()"
+               style="font-family:monospace;font-size:13px;">
+      </div>
+    {% endif %}
+
+    {% if agent_tokens %}
+      <table style="width:100%;font-size:13px;border-collapse:collapse;margin-bottom:14px;">
+        <tr style="color:var(--text2);text-align:left;">
+          <th style="padding:4px 6px;">Name</th><th style="padding:4px 6px;">Permissions</th>
+          <th style="padding:4px 6px;">Last used</th><th></th></tr>
+        {% for t in agent_tokens %}
+        <tr style="border-top:1px solid var(--border);">
+          <td style="padding:6px;">{{ t.name }}</td>
+          <td style="padding:6px;">{{ t.scopes | join(', ') }}</td>
+          <td style="padding:6px;color:var(--text2);">{{ (t.last_used_at or 'never')[:16] | replace('T', ' ') }}</td>
+          <td style="padding:6px;text-align:right;">
+            <form method="post" style="display:inline"
+                  onsubmit="return confirm('Revoke “{{ t.name }}”? Anything using it stops working immediately.')">
+              <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="action" value="agent_token_revoke">
+              <input type="hidden" name="token_id" value="{{ t.id }}">
+              <button type="submit" class="btn-save" style="background:var(--danger);padding:4px 10px;font-size:12px;">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    {% endif %}
+
+    <form method="post" style="margin-bottom:16px;">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="agent_token_create">
+      <div class="field">
+        <label for="token_name">Token name</label>
+        <input id="token_name" name="token_name" type="text" maxlength="60"
+               placeholder="e.g. Claude on laptop" required>
+      </div>
+      <div style="display:flex;gap:16px;font-size:14px;margin-bottom:12px;flex-wrap:wrap;">
+        <label><input type="checkbox" name="scope_read" checked> Read</label>
+        <label><input type="checkbox" name="scope_write" checked> Add &amp; edit</label>
+        <label><input type="checkbox" name="scope_delete"> Delete</label>
+      </div>
+      <button type="submit" class="btn-save">Create token</button>
+    </form>
+
+    {% set tok = new_agent_token or 'YOUR_TOKEN' %}
+    <details {% if new_agent_token %}open{% endif %}>
+      <summary style="cursor:pointer;font-size:14px;font-weight:600;">How to connect an assistant</summary>
+      <div style="font-size:13px;color:var(--text2);margin-top:10px;line-height:1.5;">
+        <p>MCP server URL: <code>{{ base_url }}/mcp</code> — authenticate with the header
+           <code>Authorization: Bearer {{ tok }}</code>.</p>
+
+        <p style="margin-top:10px;"><strong>Claude Code</strong></p>
+        <pre style="white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:6px;">claude mcp add --transport http doit {{ base_url }}/mcp --header "Authorization: Bearer {{ tok }}"</pre>
+
+        <p style="margin-top:10px;"><strong>Gemini CLI</strong> — in <code>~/.gemini/settings.json</code>:</p>
+        <pre style="white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:6px;">{"mcpServers": {"doit": {
+  "httpUrl": "{{ base_url }}/mcp",
+  "headers": {"Authorization": "Bearer {{ tok }}"}}}}</pre>
+
+        <p style="margin-top:10px;"><strong>Claude Desktop</strong> — in <code>claude_desktop_config.json</code> (needs Node.js):</p>
+        <pre style="white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:6px;">{"mcpServers": {"doit": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "{{ base_url }}/mcp", "--header", "Authorization:${DOIT_AUTH}"],
+  "env": {"DOIT_AUTH": "Bearer {{ tok }}"}}}}</pre>
+
+        <p style="margin-top:10px;"><strong>Anything else</strong> — plain REST, e.g.</p>
+        <pre style="white-space:pre-wrap;background:var(--bg);padding:8px;border-radius:6px;">curl -H "Authorization: Bearer {{ tok }}" "{{ base_url }}/api/v1/tasks?due_before=$(date +%F)"</pre>
+
+        <p style="margin-top:10px;">Treat a token like a password: anyone holding it can act on
+           your list within its permissions. Revoke it here if it leaks.</p>
+      </div>
+    </details>
+  </div>
+
 </div>
 </div>
 

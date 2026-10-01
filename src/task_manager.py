@@ -333,6 +333,32 @@ def append_to_archive(tasks: list, archive_file: Path) -> None:
     append_archive_lines(lines, archive_file)
 
 
+def insert_task_line(tasks_file: Path, text: str, section: str = "Inbox",
+                     notes: str = "") -> str:
+    """Insert a new open task at the top of `section`, creating the file or
+    section if needed. `text` is the description plus inline tags (no
+    checkbox, no #id). Returns the new task's id. Caller holds the user lock."""
+    new_id = _new_id()
+    if not tasks_file.exists():
+        tasks_file.parent.mkdir(parents=True, exist_ok=True)
+        tasks_file.write_text("# Tasks\n\n## Inbox\n\n", encoding="utf-8")
+    content = tasks_file.read_text(encoding="utf-8")
+    block = [f"- [ ] {text} #id:{new_id}"]
+    for nl in (notes or "").split("\n"):
+        if nl.strip():
+            block.append(nl if nl[:1] in (" ", "\t") else "  " + nl)
+    new_lines = "\n".join(block)
+    section_header = f"## {section}"
+    m = re.search(rf"^{re.escape(section_header)}[ \t]*$", content, re.MULTILINE)
+    if m:
+        insert_pos = m.end()
+        content = content[:insert_pos] + f"\n{new_lines}" + content[insert_pos:]
+    else:
+        content = content.rstrip() + f"\n\n{section_header}\n\n{new_lines}\n"
+    _write_text_atomic(tasks_file, content)
+    return new_id
+
+
 def append_to_tasks(lines: list, tasks_file: Path) -> None:
     """Append already-rendered task lines to the end of tasks.md's body."""
     if not lines:
