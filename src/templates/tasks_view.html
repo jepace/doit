@@ -46,6 +46,12 @@
   .filter-bar select.active { border-color: var(--accent); color: var(--accent);
     font-weight: 700; }
   .filter-bar select:focus { border-color: var(--accent); outline: none; }
+  .filter-text {
+    flex: 2; min-width: 120px;
+    font-size: 12px; padding: 4px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg2); color: var(--text); }
+  .filter-text:focus { border-color: var(--accent); outline: none; }
+  .filter-text.active { border-color: var(--accent); }
   .filter-clear { font-size: 12px; color: var(--accent); cursor: pointer;
     background: none; border: none; padding: 4px 6px; display: none; }
   .filter-clear.show { display: inline; }
@@ -57,7 +63,7 @@
   .group-header-row.filtered-out, .card-group-hdr.filtered-out { display: none !important; }
 
   @media print {
-    .add-form, .toolbar .bulk-wrap, .show-completed, .filter-bar select,
+    .add-form, .toolbar .bulk-wrap, .show-completed, .filter-bar select, .filter-text,
     .filter-clear, .col-sel, .col-note, .fab, .top-menu { display: none !important; }
     .filtered-out { display: none !important; }
   }
@@ -496,6 +502,8 @@
     <label class="show-completed">
       <input type="checkbox" id="show-done" autocomplete="off"> Show completed
     </label>
+    <input type="search" id="filter-text" class="filter-text" placeholder="Search tasks…"
+           autocomplete="off" aria-label="Search tasks" title="Search task text, context and notes (Esc to clear)">
     <select id="filter-ctx" data-filter="context" title="Filter by context">
       <option value="">All contexts</option>
       {% for ctx in all_contexts %}<option value="{{ ctx }}">{{ ctx }}</option>{% endfor %}
@@ -835,6 +843,7 @@ if (showDoneCb.checked) window.addEventListener('DOMContentLoaded', refreshShowD
 // ── Global filters ───────────────────────────────────────────
 let filters = {};
 try { filters = JSON.parse(localStorage.getItem('tasks-filters') || '{}') || {}; } catch (e) { filters = {}; }
+delete filters.text;
 
 function dueMatches(due, f) {
   if (!f) return true;
@@ -851,15 +860,37 @@ function dueMatches(due, f) {
   return true;
 }
 
+// Text search is ANDed with the dropdown filters, so it narrows whatever
+// context/date/priority view is already selected. Every whitespace-separated
+// word must appear somewhere in the description, context or notes.
+function searchText(el) {
+  const id = el.dataset.id;
+  const desc = el.querySelector('.ecell[data-field="description"]')?.textContent || '';
+  const note = document.querySelector(`.note-textarea[data-id="${id}"]`)?.value || '';
+  return `${desc} ${el.dataset.ctx || ''} ${note}`.toLowerCase();
+}
+
 function rowMatchesFilters(el) {
   if (filters.context  && (el.dataset.ctx    || '') !== filters.context)  return false;
   if (filters.priority && (el.dataset.pri    || '') !== filters.priority) return false;
   if (filters.due      && !dueMatches(el.dataset.due || '', filters.due)) return false;
+  if (filters.text) {
+    const hay = searchText(el);
+    if (!filters.text.toLowerCase().split(/\s+/).filter(Boolean).every(w => hay.includes(w)))
+      return false;
+  }
   return true;
 }
 
 function anyFilterActive() {
-  return !!(filters.context || filters.priority || filters.due);
+  return !!(filters.context || filters.priority || filters.due || filters.text);
+}
+
+// The dropdowns persist across visits; the search box deliberately doesn't,
+// so a forgotten search never leaves you staring at a mysteriously short list.
+function saveFilters() {
+  const { text, ...persisted } = filters;
+  localStorage.setItem('tasks-filters', JSON.stringify(persisted));
 }
 
 function applyFilters() {
@@ -885,6 +916,9 @@ function applyFilters() {
     sel.classList.toggle('active', !!filters[key]);
   });
   document.getElementById('filter-clear').classList.toggle('show', anyFilterActive());
+  const ft = document.getElementById('filter-text');
+  if (ft.value !== (filters.text || '')) ft.value = filters.text || '';
+  ft.classList.toggle('active', !!filters.text);
 
   const countEl = document.getElementById('filter-count');
   if (anyFilterActive()) {
@@ -913,10 +947,26 @@ document.querySelectorAll('.filter-bar select[data-filter]').forEach(sel => {
     const key = sel.dataset.filter;
     if (sel.value) filters[key] = sel.value;
     else delete filters[key];
-    localStorage.setItem('tasks-filters', JSON.stringify(filters));
+    saveFilters();
     applyFilters();
   });
 });
+
+(function () {
+  const ft = document.getElementById('filter-text');
+  let timer = null;
+  ft.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const v = ft.value.trim();
+      if (v) filters.text = v; else delete filters.text;
+      applyFilters();
+    }, 120);
+  });
+  ft.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { ft.value = ''; delete filters.text; applyFilters(); ft.blur(); }
+  });
+})();
 
 // Smoothly collapse a card (and its open note row) then run a callback.
 // Used instead of instant display:none to avoid layout jumps.
@@ -2217,7 +2267,8 @@ document.addEventListener('keydown', (e) => {
   if (document.activeElement.matches('input, textarea, select')) return;
   if (e.key === 'r' || e.key === 'R') { e.preventDefault(); location.reload(); }
   else if (e.key === 'n' || e.key === 'N') { e.preventDefault(); document.getElementById('f-task').focus(); }
-  else if (e.key === '?') { e.preventDefault(); alert('Keyboard shortcuts:\n\nR - Refresh list\nN - New task\n? - Help'); }
+  else if (e.key === '/') { e.preventDefault(); document.getElementById('filter-text').focus(); }
+  else if (e.key === '?') { e.preventDefault(); alert('Keyboard shortcuts:\n\nR - Refresh list\nN - New task\n/ - Search\n? - Help'); }
 });
 </script>
 {% endblock %}
