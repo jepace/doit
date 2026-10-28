@@ -33,12 +33,19 @@ load_rc_config "${name}"
 : ${doit_python:="/usr/local/bin/python3"}
 : ${doit_logfile:="/var/log/doit.log"}
 
+# rc.subr treats ${name}_user specially: it would su(8) to that user *before*
+# running daemon, so daemon couldn't open the pidfile/log or drop privileges
+# itself ("daemon: open: Permission denied"). Keep the documented knob, but
+# hand it to daemon's -u instead and hide it from rc.subr.
+doit_runas="${doit_user}"
+unset doit_user
+
 pidfile="/var/run/${name}.pid"
 procname="/usr/sbin/daemon"
 command="/usr/sbin/daemon"
 # -r restart on exit, -R 5 wait 5s between restarts (no tight crash loops),
 # -P supervisor pidfile, -u run as this user, -o append app output to the log.
-command_args="-r -R 5 -P ${pidfile} -u ${doit_user} -o ${doit_logfile} \
+command_args="-r -R 5 -P ${pidfile} -u ${doit_runas} -o ${doit_logfile} \
 ${doit_python} ${doit_dir}/src/serve.py"
 
 start_precmd="${name}_prestart"
@@ -47,7 +54,7 @@ doit_prestart()
 {
     # The app runs unprivileged, so the log must be writable by that user.
     if [ ! -e "${doit_logfile}" ]; then
-        install -o "${doit_user}" -m 640 /dev/null "${doit_logfile}"
+        install -o "${doit_runas}" -m 640 /dev/null "${doit_logfile}"
     fi
 }
 
