@@ -613,7 +613,7 @@
   </tr>
   <tr class="note-row" data-id="{{ task.id }}">
     <td colspan="9">
-      <textarea class="note-textarea" data-id="{{ task.id }}"
+      <textarea class="note-textarea" autocomplete="off" data-id="{{ task.id }}"
                 placeholder="Notes…">{{ task.notes }}</textarea>
       <div class="note-actions">
         <button onclick="saveNote('{{ task.id }}')">Save</button>
@@ -675,7 +675,7 @@
     </div>
   </div>
   <div class="card-note-row" data-id="{{ task.id }}">
-    <textarea class="note-textarea" data-id="{{ task.id }}"
+    <textarea class="note-textarea" autocomplete="off" data-id="{{ task.id }}"
               placeholder="Notes…">{{ task.notes }}</textarea>
     <div class="note-actions">
       <button onclick="saveNote('{{ task.id }}')">Save</button>
@@ -1135,15 +1135,16 @@ function createNoteRow(t, cls) {
   const el = document.createElement(cls === 'card' ? 'div' : 'tr');
   if (cls === 'card') {
     el.className = 'card-note-row'; el.dataset.id = id;
-    el.innerHTML = `<textarea class="note-textarea" placeholder="Notes…"></textarea>`
+    el.innerHTML = `<textarea class="note-textarea" autocomplete="off" placeholder="Notes…"></textarea>`
       + `<div class="note-actions"><button>Save</button><button>Cancel</button></div>`;
   } else {
     el.className = 'note-row'; el.dataset.id = id;
-    el.innerHTML = `<td colspan="9"><textarea class="note-textarea" placeholder="Notes…"></textarea>`
+    el.innerHTML = `<td colspan="9"><textarea class="note-textarea" autocomplete="off" placeholder="Notes…"></textarea>`
       + `<div class="note-actions"><button>Save</button><button>Cancel</button></div></td>`;
   }
   const ta = el.querySelector('.note-textarea');
-  ta.dataset.id = id; ta.value = t.notes || '';
+  ta.dataset.id = id;
+  ta.defaultValue = ta.value = t.notes || '';   // see resetNoteBoxes()
   const [saveB, cancelB] = el.querySelectorAll('.note-actions button');
   saveB.setAttribute('onclick', `saveNote('${id}')`);
   cancelB.setAttribute('onclick', `closeNote('${id}')`);
@@ -1396,6 +1397,20 @@ function wireNoteBtn(btn) {
 }
 document.querySelectorAll('.note-btn, .card-note-btn').forEach(wireNoteBtn);
 
+// Firefox (and others, on back/forward) refill form fields after a reload by
+// their position on the page, not by which task they belong to. The task order
+// changes between loads, so a stale value — usually an empty box — can land on
+// a task that has a note, making it look deleted (and deleting it for real if
+// the blank box is then saved). defaultValue is what the server rendered, so
+// resetting to it undoes any such restore regardless of browser.
+function resetNoteBoxes() {
+  document.querySelectorAll('.note-textarea').forEach(ta => {
+    if (ta.value !== ta.defaultValue) ta.value = ta.defaultValue;
+  });
+}
+resetNoteBoxes();
+window.addEventListener('pageshow', e => { if (e.persisted) resetNoteBoxes(); });
+
 function closeNote(id) {
   const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
   if (tnr) tnr.classList.remove('open');
@@ -1414,12 +1429,23 @@ async function saveNote(id) {
     val = cnr.querySelector(`.note-textarea`).value;
   }
 
+  // Saving an empty box over a task that has a note deletes the note. That's
+  // legitimate when you mean it, but it's also exactly what a browser-blanked
+  // box would do, so make it an explicit choice rather than a silent one.
+  const hadNote = !!document.querySelector(
+    `.note-btn.has-note[data-id="${id}"], .card-note-btn.has-note[data-id="${id}"]`);
+  if (hadNote && !val.trim() &&
+      !confirm('This will delete the note on this task. Delete it?')) return;
+
   const result = await apiUpdate(id, 'notes', val);
   if (!result.ok) { alert('Failed to save note. Please try again.'); return; }
 
   const has = val.trim().length > 0;
   // Sync both textareas
-  document.querySelectorAll(`.note-textarea[data-id="${id}"]`).forEach(ta => { ta.value = val; });
+  // Keep defaultValue in step: it's what resetNoteBoxes() treats as the truth.
+  document.querySelectorAll(`.note-textarea[data-id="${id}"]`).forEach(ta => {
+    ta.defaultValue = val; ta.value = val;
+  });
   // Update note buttons
   document.querySelectorAll(`.note-btn[data-id="${id}"], .card-note-btn[data-id="${id}"]`).forEach(btn => {
     btn.textContent = has ? '📝' : (btn.classList.contains('card-note-btn') ? '＋' : '+');
