@@ -201,7 +201,8 @@
   .grp-select-all { width: 13px; height: 13px; cursor: pointer; vertical-align: middle; margin-right: 6px; accent-color: currentColor; }
 
   /* Done date badge */
-  .done-date { font-size: 10px; opacity: .6; margin-left: 6px; }
+  .done-date { display: inline-block; font-size: 11px; font-weight: 600; color: var(--success, #34c759);
+               background: #34c75918; border-radius: 4px; padding: 1px 6px; margin-left: 8px; white-space: nowrap; }
 
   /* Bulk date picker overlay */
   .bulk-date-overlay { position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 200;
@@ -581,7 +582,7 @@
         {% if task.complete %}checked{% endif %}></td>
     <td>
       <span class="ecell task-name-text{% if not task.description %} empty{% endif %}"
-            data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.complete and task.tags.get('#done') %}<span class="done-date">✓ {{ task.tags.get('#done') }}</span>{% endif %}
+            data-id="{{ task.id }}" data-field="description">{{ task.description or '—' }}</span>{% if task.complete and task.tags.get('#done') %}<span class="done-date">Done {{ task.tags.get('#done') }}</span>{% endif %}
     </td>
     <td>
       <span class="ecell{% if not task.context %} empty{% endif %}"
@@ -767,16 +768,27 @@ function applyShowDone() {
 // first time it's needed, so page weight no longer grows with the archive.
 let archiveLoaded = false, archiveLoading = false;
 
+function addDoneBadge(el, done) {
+  if (!el || !done) return;
+  el.dataset.done = done;
+  el.querySelector('.done-date')?.remove();
+  const span = document.createElement('span');
+  span.className = 'done-date';
+  span.textContent = `Done ${done}`;
+  const anchor = el.querySelector('.card-meta .card-due') || el.querySelector('.ecell[data-field="description"]');
+  anchor?.after(span);
+}
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 function markAsCompletedRow(row, t) {
   row.classList.add('completed');
   const cb = row.querySelector('.primary-cb');
   if (cb) cb.checked = true;
-  if (t.done) {
-    const span = document.createElement('span');
-    span.className = 'done-date';
-    span.textContent = ` ✓ ${t.done}`;
-    row.querySelector('.ecell[data-field="description"]')?.after(span);
-  }
+  addDoneBadge(row, t.done);
 }
 
 async function loadArchive() {
@@ -804,6 +816,7 @@ async function loadArchive() {
         const card = createTaskCard(t), cnote = createNoteRow(t, 'card');
         card.classList.add('completed');
         card.dataset.complete = 'true';
+        addDoneBadge(card, t.done);
         const ccb = card.querySelector('.card-cb');
         if (ccb) ccb.checked = true;
         cardList.appendChild(card); cardList.appendChild(cnote);
@@ -1056,6 +1069,8 @@ async function applyCompletion(id, animate) {
 
   row?.classList.add('completed');
   card?.classList.add('completed');
+  addDoneBadge(row, todayISO());
+  addDoneBadge(card, todayISO());
 
   const tnr = document.querySelector(`.tasks-table .note-row[data-id="${id}"]`);
   const cnr = document.querySelector(`.card-note-row[data-id="${id}"]`);
@@ -1259,6 +1274,7 @@ function wirePrimaryCb(cb) {
       }
       row?.classList.remove('completed');
       card?.classList.remove('completed');
+      [row, card].forEach(el => { el?.querySelector('.done-date')?.remove(); if (el) el.dataset.done = ''; });
       apiUpdate(id, 'complete', 'false');
       syncTableGroups();
       buildCardGroups();
