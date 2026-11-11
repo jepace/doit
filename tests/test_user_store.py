@@ -91,7 +91,7 @@ class TestNoAccountEnumeration:
         assert errors == {store.GENERIC_AUTH_ERROR}
 
     def test_locked_account_is_generic_on_wrong_password(self, store, user):
-        for _ in range(5):
+        for _ in range(__import__("user_store").ACCOUNT_LOCK_THRESHOLD):
             store.record_failed_login(user["id"])
         assert store.is_locked(user["id"])
         u, err = store.authenticate(TEST_EMAIL, "wrong-password")
@@ -99,7 +99,7 @@ class TestNoAccountEnumeration:
         assert err == store.GENERIC_AUTH_ERROR      # not "locked"
 
     def test_locked_account_is_disclosed_on_correct_password(self, store, user):
-        for _ in range(5):
+        for _ in range(__import__("user_store").ACCOUNT_LOCK_THRESHOLD):
             store.record_failed_login(user["id"])
         u, err = store.authenticate(TEST_EMAIL, TEST_PASSWORD)
         assert u is None
@@ -107,7 +107,7 @@ class TestNoAccountEnumeration:
 
     def test_failed_attempts_on_locked_account_do_not_extend_the_lock(self, store, user):
         import user_store as us
-        for _ in range(5):
+        for _ in range(__import__("user_store").ACCOUNT_LOCK_THRESHOLD):
             store.record_failed_login(user["id"])
         before = us._read_json(us._profile_path(user["id"]))["failed_logins"]
         store.authenticate(TEST_EMAIL, "wrong-password")

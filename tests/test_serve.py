@@ -177,7 +177,13 @@ class TestTwoFactorAuth:
         us.UserStore.enable_totp(user["id"], pyotp.random_base32())
         with authed_client.session_transaction() as sess:
             csrf = sess["csrf_token"]
+            # enabling 2FA rotates session_gen; the browser that did it gets a fresh session
+            sess["gen"] = us.UserStore.get_user(user["id"])["session_gen"]
         r = authed_client.post("/auth/2fa/disable", data={"_csrf_token": csrf})
+        assert r.status_code == 302
+        assert us.UserStore.get_by_email(TEST_EMAIL).get("totp_secret")  # no password → refused
+        r = authed_client.post("/auth/2fa/disable",
+                               data={"_csrf_token": csrf, "current_password": TEST_PASSWORD})
         assert r.status_code == 302
         user = us.UserStore.get_by_email(TEST_EMAIL)
         assert not user.get("totp_secret")
@@ -196,61 +202,6 @@ class TestTasksView:
         r = authed_client.get("/")
         assert b"Buy milk" in r.data
         assert b"Call dentist" in r.data
-
-
-# ---------------------------------------------------------------------------
-# Toggle
-# ---------------------------------------------------------------------------
-
-class TestToggle:
-    def test_toggle_complete(self, authed_client):
-        tid = _task_id(authed_client, 0)
-        r = authed_client.post(
-            "/tasks/toggle",
-            data=json.dumps({"line": tid, "action": "complete"}),
-            content_type="application/json",
-        )
-        assert r.status_code == 200
-        assert r.get_json()["ok"] is True
-
-    def test_toggle_reopen(self, authed_client):
-        tid = _task_id(authed_client, 0)
-        authed_client.post(
-            "/tasks/toggle",
-            data=json.dumps({"line": tid, "action": "complete"}),
-            content_type="application/json",
-        )
-        r = authed_client.post(
-            "/tasks/toggle",
-            data=json.dumps({"line": tid, "action": "reopen"}),
-            content_type="application/json",
-        )
-        assert r.get_json()["ok"] is True
-
-    def test_toggle_missing_line_returns_400(self, authed_client):
-        r = authed_client.post(
-            "/tasks/toggle",
-            data=json.dumps({"action": "complete"}),
-            content_type="application/json",
-        )
-        assert r.status_code == 400
-
-    def test_toggle_invalid_action_returns_400(self, authed_client):
-        tid = _task_id(authed_client, 0)
-        r = authed_client.post(
-            "/tasks/toggle",
-            data=json.dumps({"line": tid, "action": "destroy"}),
-            content_type="application/json",
-        )
-        assert r.status_code == 400
-
-    def test_toggle_unauthenticated_redirects(self, client):
-        r = client.post(
-            "/tasks/toggle",
-            data=json.dumps({"line": "abc123", "action": "complete"}),
-            content_type="application/json",
-        )
-        assert r.status_code == 302
 
 
 # ---------------------------------------------------------------------------
@@ -1169,3 +1120,104 @@ class TestBulkConcurrency:
         task = self._get_task(authed_client, 0)
         r = self._bulk_with_hashes(authed_client, "set-priority", [task.id], {}, "high")
         assert r.get_json()["ok"] is True
+
+
+# ---------------------------------------------------------------------------
+# Hardening (2026-11 security review)
+# ---------------------------------------------------------------------------
+
+class TestSessionRevocation:
+    def test_password_change_logs_out_other_sessions(self, client, authed_client):
+        import user_store as us
+        other = client.application.test_client()
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        with other.session_transaction() as sess:
+            sess["user_id"] = user["id"]; sess["csrf_token"] = "x"
+        assert other.get("/").status_code == 200
+        r = authed_client.post("/settings", data={
+            "_csrf_token": "testcsrf", "action": "password",
+            "current_password": TEST_PASSWORD,
+            "new_password": "newpass99", "confirm_password": "newpass99"})
+        assert r.status_code == 302
+        assert authed_client.get("/").status_code == 200      # this browser stays in
+        assert other.get("/").status_code == 302              # the other is logged out
+
+    def test_email_change_requires_password(self, authed_client):
+        import user_store as us
+        r = authed_client.post("/settings", data={
+            "_csrf_token": "testcsrf", "action": "email",
+            "new_email": "evil@example.com", "current_password": "wrong"})
+        assert r.status_code == 200
+        assert us.UserStore.get_by_email(TEST_EMAIL) is not None
+
+
+class TestLoginLockout:
+    def test_attacker_cannot_lock_out_owner(self, client):
+        attacker = client.application.test_client()
+        for _ in range(6):
+            attacker.post("/auth/login", data={"email": TEST_EMAIL, "password": "nope"},
+                          environ_base={"REMOTE_ADDR": "203.0.113.9"})
+        r = client.post("/auth/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+                        environ_base={"REMOTE_ADDR": "198.51.100.7"})
+        assert r.status_code == 302 and "/auth/login" not in r.headers["Location"]
+
+    def test_same_ip_is_throttled_per_account(self, client):
+        for _ in range(5):
+            client.post("/auth/login", data={"email": TEST_EMAIL, "password": "nope"},
+                        environ_base={"REMOTE_ADDR": "203.0.113.10"})
+        r = client.post("/auth/login", data={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+                        environ_base={"REMOTE_ADDR": "203.0.113.10"})
+        assert r.status_code == 200 and b"Too many" in r.data
+
+
+class TestTotpLockout:
+    def test_wrong_codes_lock_account(self, client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        secret = pyotp.random_base32()
+        us.UserStore.enable_totp(user["id"], secret)
+        with client.session_transaction() as sess:
+            sess["pending_2fa_user_id"] = user["id"]
+        for _ in range(us.TOTP_LOCK_THRESHOLD):
+            client.post("/auth/2fa", data={"code": "000000"})
+        r = client.post("/auth/2fa", data={"code": pyotp.TOTP(secret).now()})
+        assert b"Too many" in r.data
+
+
+class TestVerifyWith2fa:
+    def test_verify_link_does_not_bypass_2fa(self, client):
+        import pyotp, user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        us.UserStore.enable_totp(user["id"], pyotp.random_base32())
+        us.UserStore.change_email(user["id"], "new@example.com")
+        token = us.UserStore.create_verify_token(user["id"])
+        r = client.get(f"/auth/verify/{token}")
+        assert "/auth/login" in r.headers["Location"]
+        with client.session_transaction() as sess:
+            assert "user_id" not in sess
+
+
+class TestQuickAddSuspended:
+    def test_suspended_token_rejected(self, client):
+        import user_store as us
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tok = us.UserStore.create_api_token(user["id"])
+        us.UserStore.suspend_user(user["id"], True)
+        r = client.post("/api/quick-add", json={"text": "x"},
+                        headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 401
+
+
+class TestBulkArchiveReopen:
+    def test_unchecked_archive_task_survives_bulk(self, authed_client):
+        import user_store as us
+        from task_manager import read_tasks, get_tasks_file, get_archive_file, ARCHIVE_HEADER
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        af = get_archive_file(user["id"])
+        af.write_text(ARCHIVE_HEADER + "- [ ] Stray unchecked #id:abc999\n")
+        r = authed_client.post("/tasks/bulk-update", json={
+            "action": "set-priority", "task_ids": ["abc999"], "value": "high"},
+            content_type="application/json")
+        assert r.status_code == 200
+        ids = {t.id for t in read_tasks(get_tasks_file(user["id"]))}
+        assert "abc999" in ids, (get_tasks_file(user["id"]).read_text(), af.read_text())

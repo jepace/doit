@@ -156,6 +156,9 @@
         <label for="new_email">Current: <strong>{{ user.email }}</strong></label>
         <input id="new_email" name="new_email" type="email"
                placeholder="new@example.com" autocomplete="email">
+        <label for="email_current_password" style="margin-top:10px">Current password</label>
+        <input id="email_current_password" name="current_password" type="password"
+               autocomplete="current-password" required>
         <p class="email-note">Changing your email will require re-verification before you can log in again.</p>
       </div>
       <button type="submit" class="btn-save">Update Email</button>
@@ -175,8 +178,11 @@
         2FA is <strong style="color:var(--success);">enabled</strong>.
         Your account requires a code from your authenticator app on sign-in.
       </p>
+      {% if request.args.get('2fa') == 'badpw' %}<div class="error">Current password is incorrect — 2FA is still on.</div>{% endif %}
       <form method="post" action="/auth/2fa/disable">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token }}">
+        <input name="current_password" type="password" placeholder="Current password"
+               autocomplete="current-password" required style="margin-bottom:8px">
         <button type="submit" class="btn-save"
                 style="background:var(--danger);"
                 onclick="return confirm('Disable two-factor authentication?')">

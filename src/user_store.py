@@ -194,6 +194,11 @@ def _default_prefs() -> dict:
 _DUMMY_HASH = generate_password_hash("dummy-for-timing-equalization")
 
 
+ACCOUNT_LOCK_THRESHOLD = 50   # failed passwords (all IPs) before a 15-min lock
+TOTP_LOCK_THRESHOLD    = 5    # failed 2FA codes before a lock
+TOTP_LOCK_MINUTES      = 60
+
+
 class UserStore:
     """Stateless — all methods read/write files under data/{uuid}/."""
 
@@ -343,7 +348,12 @@ class UserStore:
             if p is None:
                 return
             p["failed_logins"] = p.get("failed_logins", 0) + 1
-            if p["failed_logins"] >= 5:
+            # Per-(email, IP) throttling in serve.py stops a single attacker
+            # after a few tries without locking the real owner out. This
+            # account-wide lock is only a backstop against guessing spread
+            # across many IPs, so its threshold is deliberately high — a low
+            # one let anyone who knew an address lock its owner out at will.
+            if p["failed_logins"] >= ACCOUNT_LOCK_THRESHOLD:
                 p["locked_until"] = (_utcnow() + timedelta(minutes=15)).isoformat()
             _write_json(_profile_path(user_id), p)
 
@@ -471,6 +481,7 @@ class UserStore:
             except ValueError:
                 return False
             p["password_hash"]       = generate_password_hash(new_password)
+            p["session_gen"]         = p.get("session_gen", 0) + 1
             p["reset_token_hash"]    = None
             p["reset_token_expires"] = None
             p["failed_logins"]       = 0
@@ -529,6 +540,10 @@ class UserStore:
             return None
         p = _read_json(_profile_path(user_id))
         if not p or not secrets.compare_digest(p.get("api_token_hash") or "", h):
+            return None
+        # Same account-state rules as agent tokens and the session: a
+        # suspended or unverified account's token must stop working.
+        if p.get("suspended") or not p.get("verified"):
             return None
         return cls.get_user(user_id)
 
@@ -737,6 +752,7 @@ class UserStore:
             if not check_password_hash(p["password_hash"], current_password):
                 return False, "Current password is incorrect."
             p["password_hash"] = generate_password_hash(new_password)
+            p["session_gen"]   = p.get("session_gen", 0) + 1
             _write_json(_profile_path(user_id), p)
         return True, ""
 
@@ -763,6 +779,7 @@ class UserStore:
             if p is None:
                 return
             p["totp_secret"] = secret
+            p["session_gen"] = p.get("session_gen", 0) + 1
             _write_json(_profile_path(user_id), p)
 
     @classmethod
@@ -772,6 +789,47 @@ class UserStore:
             if p is None:
                 return
             p.pop("totp_secret", None)
+            _write_json(_profile_path(user_id), p)
+
+    @classmethod
+    def check_password(cls, user_id: str, password: str) -> bool:
+        """Re-authentication for sensitive settings changes."""
+        p = _read_json(_profile_path(user_id))
+        return bool(p) and check_password_hash(p["password_hash"], password or "")
+
+    @classmethod
+    def bump_session_gen(cls, user_id: str) -> int:
+        """Invalidate every existing session for this user; returns the new gen."""
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return 0
+            p["session_gen"] = p.get("session_gen", 0) + 1
+            _write_json(_profile_path(user_id), p)
+            return p["session_gen"]
+
+    @classmethod
+    def record_failed_totp(cls, user_id: str) -> None:
+        """Count a wrong 2FA code; lock the account after TOTP_LOCK_THRESHOLD.
+        Persisted in the profile, so the budget is shared by every worker and
+        survives restarts (an in-memory limit alone would reset on both)."""
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None:
+                return
+            p["failed_totp"] = p.get("failed_totp", 0) + 1
+            if p["failed_totp"] >= TOTP_LOCK_THRESHOLD:
+                p["failed_totp"] = 0
+                p["locked_until"] = (_utcnow() + timedelta(minutes=TOTP_LOCK_MINUTES)).isoformat()
+            _write_json(_profile_path(user_id), p)
+
+    @classmethod
+    def clear_failed_totp(cls, user_id: str) -> None:
+        with _get_lock(user_id):
+            p = _read_json(_profile_path(user_id))
+            if p is None or not p.get("failed_totp"):
+                return
+            p["failed_totp"] = 0
             _write_json(_profile_path(user_id), p)
 
     @classmethod

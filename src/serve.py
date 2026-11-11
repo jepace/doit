@@ -106,11 +106,12 @@ MAX_NOTES_LEN  = 20_000    # a task's note body (legitimately multi-line)
 MAX_FIELD_LEN  = 500       # due/context/priority/etc. single-value fields
 MAX_BULK_IDS   = 500       # task_ids accepted in one bulk-update call
 
-if cfg_bool("server", "https"):
-    # Trust X-Forwarded-For / X-Forwarded-Proto from a single reverse proxy
-    # so request.remote_addr and request.url reflect the real client values.
+# Trust X-Forwarded-For / -Proto only when actually behind a reverse proxy;
+# a directly reachable server that trusted them would let any client forge
+# its IP and dodge every per-IP rate limit. Defaults to the https flag for
+# backwards compatibility with existing configs (https meant "behind nginx").
+if cfg_bool("server", "behind_proxy", cfg_bool("server", "https")):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-    _behind_proxy = True
 
 
 # ---------------------------------------------------------------------------
@@ -183,13 +184,17 @@ def _check_rate_limit(key: str, max_requests: int, window_seconds: int) -> bool:
         return True
 
 
-# True when ProxyFix is active and X-Forwarded-For can be trusted
-_behind_proxy: bool = False
+def _rate_limit_peek(key: str, max_requests: int, window_seconds: int) -> bool:
+    """Like _check_rate_limit() but doesn't record a hit."""
+    now = time.time()
+    with _rate_limit_lock:
+        recent = [t for t in _rate_limit.get(key, []) if now - t < window_seconds]
+        return len(recent) < max_requests
 
 
 def _ip() -> str:
     # request.remote_addr is already the real client IP in both cases: when
-    # _behind_proxy is set, ProxyFix has rewritten it from X-Forwarded-For.
+    # behind a proxy, ProxyFix has rewritten it from X-Forwarded-For.
     return request.remote_addr or "unknown"
 
 
@@ -249,7 +254,12 @@ def load_user():
     user_id = session.get("user_id")
     if user_id:
         user = UserStore.get_user(user_id)
-        if user and not user.get("suspended"):
+        # session_gen is bumped on password change/reset, 2FA enrollment and
+        # email change. Sessions are signed client-side cookies with no server
+        # record, so this is what lets those events log out every other
+        # browser — otherwise a stolen cookie stayed valid for its full life.
+        if (user and not user.get("suspended")
+                and session.get("gen", 0) == user.get("session_gen", 0)):
             g.user = user
         else:
             # User deleted or suspended — clear session
@@ -297,6 +307,16 @@ def require_admin(f):
             abort(404)
         return f(*args, **kwargs)
     return decorated
+
+
+def _start_session(user_id: str) -> None:
+    """Establish a fresh, fully-authenticated session for user_id."""
+    user = UserStore.get_user(user_id) or {}
+    session.clear()
+    session.permanent = True
+    session["user_id"] = user_id
+    session["gen"] = user.get("session_gen", 0)
+    session["csrf_token"] = secrets.token_hex(32)
 
 
 # ---------------------------------------------------------------------------
@@ -388,9 +408,12 @@ def auth_verify(token):
                                error="This verification link is invalid or has expired.")
     log.info("verify: email verified for %s", user.get("email"))
     session.pop("pending_email", None)
-    session.permanent = True
-    session["user_id"] = user["id"]
-    session["csrf_token"] = secrets.token_hex(32)
+    if user.get("totp_secret"):
+        # A verify link proves control of the mailbox, not the second factor.
+        # (2FA accounts get here after an email change.) Make them sign in.
+        flash("Your email has been verified. Please sign in.")
+        return redirect(url_for("auth_login"))
+    _start_session(user["id"])
     flash("Your email has been verified. Welcome!")
     return redirect(url_for("tasks"))
 
@@ -424,7 +447,16 @@ def auth_login():
         else:
             email    = request.form.get("email", "").strip()
             password = request.form.get("password", "")
+            # Per-(account, IP) failure budget: stops one attacker guessing a
+            # given account without letting them lock its real owner out.
+            fail_key = f"loginfail:{email.lower()}:{ip}"
+            if not _rate_limit_peek(fail_key, 5, 900):
+                log.warning("login: per-account rate limit hit for %s from %s", email, ip)
+                return render_template("login.html", error="Too many login attempts. Please try again later.",
+                                       next=request.args.get("next", ""))
             user, err = UserStore.authenticate(email, password)
+            if not user and err == UserStore.GENERIC_AUTH_ERROR:
+                _check_rate_limit(fail_key, 5, 900)
             if user:
                 log.info("login: success for %s from %s", email, ip)
                 next_url = _safe_next(request.form.get("next") or request.args.get("next", ""))
@@ -433,10 +465,7 @@ def auth_login():
                     session["pending_2fa_user_id"] = user["id"]
                     session["pending_2fa_next"] = next_url
                     return redirect(url_for("auth_2fa"))
-                session.clear()
-                session.permanent = True
-                session["user_id"] = user["id"]
-                session["csrf_token"] = secrets.token_hex(32)
+                _start_session(user["id"])
                 return redirect(next_url)
             elif err == "Please verify your email address before signing in.":
                 # Don't auto-resend here — that would allow email-bombing unverified
@@ -465,14 +494,16 @@ def auth_2fa():
             log.warning("2fa: rate limit hit for user %s from %s", user_id, _ip())
             return render_template(
                 "2fa.html", error="Too many attempts. Please wait and try again.")
+        if UserStore.is_locked(user_id):
+            return render_template(
+                "2fa.html", error="Too many attempts. Please wait and try again.")
         code = request.form.get("code", "").strip()
         if UserStore.verify_totp(user_id, code):
+            UserStore.clear_failed_totp(user_id)
             next_url = session.get("pending_2fa_next") or url_for("tasks")
-            session.clear()
-            session.permanent = True
-            session["user_id"] = user_id
-            session["csrf_token"] = secrets.token_hex(32)
+            _start_session(user_id)
             return redirect(next_url)
+        UserStore.record_failed_totp(user_id)
         log.warning("2fa: invalid code for user %s from %s", user_id, _ip())
         error = "Invalid code — try again."
     return render_template("2fa.html", error=error)
@@ -497,8 +528,8 @@ def auth_2fa_setup():
         code = request.form.get("code", "").strip()
         totp = pyotp.TOTP(secret)
         if totp.verify(code.replace(" ", ""), valid_window=1):
-            UserStore.enable_totp(user["id"], secret)
-            session.pop("pending_totp_secret", None)
+            UserStore.enable_totp(user["id"], secret)  # also logs out other sessions
+            _start_session(user["id"])
             log.info("2fa: enabled for %s", user["email"])
             return redirect(url_for("settings") + "?2fa=enabled")
         error = "Code didn't match — please try again."
@@ -517,6 +548,8 @@ def auth_2fa_setup():
 def auth_2fa_disable():
     if not validate_csrf():
         return "CSRF check failed", 403
+    if not UserStore.check_password(g.user["id"], request.form.get("current_password", "")):
+        return redirect(url_for("settings") + "?2fa=badpw")
     UserStore.disable_totp(g.user["id"])
     log.info("2fa: disabled for %s", g.user["email"])
     return redirect(url_for("settings") + "?2fa=disabled")
@@ -769,30 +802,6 @@ def tasks_print():
                            first_page=FIRST_PAGE, full_page=FULL_PAGE)
 
 
-@app.route("/tasks/toggle", methods=["POST"])
-@require_login
-def tasks_toggle():
-    data    = request.get_json(silent=True) or {}
-    task_id = data.get("line")   # accepts string ID or legacy int index
-    action  = data.get("action")
-    if task_id is None or action not in ("complete", "reopen"):
-        return {"error": "bad request"}, 400
-    with get_user_lock(g.user["id"]):
-        task, task_list, in_archive = _load_for_edit(str(task_id))
-        if task is None:
-            return {"ok": False}
-        if action == "complete":
-            task.complete_task()
-        else:
-            task.reopen_task()
-        if in_archive:
-            write_archive(task_list, _get_archive_file(), _get_tasks_file())
-        else:
-            write_tasks(task_list, _get_tasks_file(),
-                        archive_file=_get_archive_file())
-        return {"ok": True}
-
-
 @app.route("/tasks/add", methods=["POST"])
 @require_login
 def tasks_add():
@@ -1003,9 +1012,22 @@ def tasks_bulk_update():
                 if task is not None:
                     _apply(task)
 
+        # An archived task that isn't marked complete belongs in tasks.md. Pass
+        # it to write_tasks() as extra lines and write tasks.md first
+        # (destination before source) — write_archive(..., tasks_file) would
+        # append it to tasks.md only for write_tasks() to then overwrite
+        # tasks.md from the stale list, losing it from both files.
+        moved = []
         if archive_list is not None:
-            write_archive(archive_list, archive_file, tasks_file)
-        write_tasks(tasks_list, tasks_file, archive_file=archive_file)
+            from task_manager import _render_task_lines
+            for t in archive_list:
+                if not t.complete:
+                    moved.extend(_render_task_lines(t))
+            archive_list = [t for t in archive_list if t.complete]
+        write_tasks(tasks_list, tasks_file, extra_lines=moved or None,
+                    archive_file=archive_file)
+        if archive_list is not None:
+            write_archive(archive_list, archive_file)
     return {"ok": True}
 
 
@@ -1041,18 +1063,21 @@ def settings():
 
         elif action == "email":
             new_email = request.form.get("new_email", "").strip().lower()
-            try:
-                UserStore.change_email(user["id"], new_email)
-                token = UserStore.create_verify_token(user["id"])
-                ok = send_verification_email(new_email, token, base_url)
-                if not ok:
-                    log.error("settings: verification email failed for %s (user %s)", new_email, user["id"])
-                    errors["email"] = "Email address updated but we could not send the verification email. Contact support."
+            if not UserStore.check_password(user["id"], request.form.get("current_password", "")):
+                errors["email"] = "Current password is incorrect."
+            else:
+                try:
+                    UserStore.change_email(user["id"], new_email)
+                except ValueError as e:
+                    errors["email"] = str(e)
                 else:
+                    UserStore.bump_session_gen(user["id"])  # log out every session
+                    token = UserStore.create_verify_token(user["id"])
+                    if not send_verification_email(new_email, token, base_url):
+                        log.error("settings: verification email failed for %s (user %s)",
+                                  new_email, user["id"])
                     session.clear()
                     return redirect(url_for("verify_pending", email=new_email))
-            except ValueError as e:
-                errors["email"] = str(e)
 
         elif action == "password":
             current_pw = request.form.get("current_password", "")
@@ -1063,6 +1088,7 @@ def settings():
             else:
                 ok, msg = UserStore.change_password(user["id"], current_pw, new_pw)
                 if ok:
+                    _start_session(user["id"])  # keep this browser; others are logged out
                     return redirect(url_for("settings", saved="1"))
                 else:
                     errors["password"] = msg
@@ -1219,4 +1245,20 @@ if __name__ == "__main__":
         log.info("No users yet — register at http://%s:%s/register", host, port)
 
     log.info("Starting doit on http://%s:%s (debug=%s, data=%s)", host, port, debug, DATA_DIR)
-    app.run(host=host, port=port, debug=debug)
+    if debug:
+        log.warning("debug=true: using the Werkzeug dev server — never expose this to the internet")
+        app.run(host=host, port=port, debug=True)
+    else:
+        # Werkzeug's built-in server is for development only. waitress is a
+        # pure-Python production WSGI server (no compiler needed, works on
+        # FreeBSD/Windows) that buffers requests, so slow clients can't tie
+        # up worker threads.
+        try:
+            from waitress import serve as waitress_serve
+        except ImportError:
+            log.warning("waitress not installed (pip install waitress) — falling back "
+                        "to the Werkzeug development server, which isn't meant for production")
+            app.run(host=host, port=port)
+        else:
+            waitress_serve(app, host=host, port=port,
+                           threads=cfg_int("server", "threads", 8), ident="doit")

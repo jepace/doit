@@ -5,6 +5,8 @@
     "port":     8080,
     "https":    true,
     "_https_help": "Set to true when behind a TLS-terminating reverse proxy (nginx+certbot). Enables SESSION_COOKIE_SECURE and trusts X-Forwarded-* headers so real client IPs are used for rate limiting.",
+    "behind_proxy": true,
+    "_behind_proxy_help": "Trust X-Forwarded-For/-Proto from a reverse proxy. Only set true when the app port is reachable solely by the proxy (bind to 127.0.0.1); otherwise clients could forge their IP to evade rate limits. Defaults to the value of https.",
     "base_url": "https://doit.pacehouse.com",
     "_base_url_help": "Used in verification and password-reset emails. Set to your public URL, e.g. https://doit.pacehouse.com",
     "secret":      "",
