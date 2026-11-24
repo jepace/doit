@@ -1238,3 +1238,21 @@ class TestStats:
 
     def test_stats_requires_login(self, client):
         assert client.get("/stats").status_code == 302
+
+
+class TestPostponeTracking:
+    def test_pushing_due_later_is_logged_and_shown(self, authed_client):
+        import user_store as us
+        from datetime import date, timedelta
+        from task_manager import read_history, get_tasks_file, HISTORY_NAME
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        tid = _task_id(authed_client, 0)
+        later = (date.today() + timedelta(days=400)).isoformat()
+        earlier = (date.today() - timedelta(days=400)).isoformat()
+        for v in (earlier, later):  # first is a pull-in (not logged), second a push
+            authed_client.post("/tasks/update", content_type="application/json",
+                               data=json.dumps({"task_id": tid, "field": "due", "value": v}))
+        h = read_history(get_tasks_file(user["id"]).parent / HISTORY_NAME)
+        assert [(e["from"], e["to"], e["overdue"]) for e in h] == [(earlier, later, True)]
+        r = authed_client.get("/stats")
+        assert b"Most postponed" in r.data and b"1\xc3\x97" in r.data

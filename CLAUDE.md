@@ -63,6 +63,7 @@ data/
     preferences.json        # display preferences (theme, sort, etc.)
     tasks.md                # user's ACTIVE tasks in markdown
     archive.md              # completed tasks (append-only; fetched on demand)
+    history.jsonl           # append-only event log (due-date postponements) for /stats
     .{uuid}.lock            # flock sidecar for this user
   .secret                   # auto-generated Flask session secret (chmod 0o600)
 ```

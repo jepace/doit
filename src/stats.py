@@ -18,7 +18,7 @@ def _d(s):
         return None
 
 
-def compute_stats(active: list, archived: list, today: date) -> dict:
+def compute_stats(active: list, archived: list, today: date, history: list = ()) -> dict:
     open_tasks = [t for t in active if not t.complete]
     done = [(t, _d(t.tags.get("#done"))) for t in archived if t.complete]
     done = [(t, d) for t, d in done if d and d <= today]
@@ -85,6 +85,25 @@ def compute_stats(active: list, archived: list, today: date) -> dict:
                   "days": (today - _d(t.due)).days, "context": t.context}
                  for t in lingering]
 
-    return {"tiles": tiles, "weekly": weekly, "avg_week": avg_week,
+    # ── Postponements (from history.jsonl) ────────────────────────
+    posts = [e for e in history if e.get("type") == "postpone" and _d(e.get("date"))]
+    recent = [e for e in posts if _d(e["date"]) > today - timedelta(days=30)]
+    tiles["postponed_30"] = len(recent)
+    tiles["postponed_overdue_30"] = sum(1 for e in recent if e.get("overdue"))
+    open_ids = {t.id: t for t in open_tasks}
+    per_task = {}
+    for e in posts:
+        if e.get("id") not in open_ids:
+            continue
+        r = per_task.setdefault(e["id"], {"count": 0, "days": 0})
+        r["count"] += 1
+        f, to = _d(e.get("from")), _d(e.get("to"))
+        if f and to:
+            r["days"] += (to - f).days
+    most_postponed = sorted(per_task.items(), key=lambda kv: (-kv[1]["count"], -kv[1]["days"]))[:5]
+    most_postponed = [{"description": open_ids[i].description, "due": open_ids[i].due, **r}
+                      for i, r in most_postponed]
+
+    return {"tiles": tiles, "most_postponed": most_postponed, "weekly": weekly, "avg_week": avg_week,
             "by_dow": by_dow, "by_ctx": by_ctx, "open_by_due": open_by_due,
             "lingering": lingering}

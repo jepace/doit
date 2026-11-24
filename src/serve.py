@@ -761,8 +761,10 @@ def tasks_archive():
 def stats_page():
     from datetime import date
     from stats import compute_stats
+    from task_manager import read_history, HISTORY_NAME
     data = compute_stats(read_tasks(_get_tasks_file()),
-                         read_tasks(_get_archive_file()), date.today())
+                         read_tasks(_get_archive_file()), date.today(),
+                         read_history(_get_tasks_file().parent / HISTORY_NAME))
     return render_template("stats.html", s=data)
 
 

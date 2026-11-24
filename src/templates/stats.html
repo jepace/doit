@@ -88,11 +88,14 @@
       <div class="lbl">On time, last 90 days{% if t.on_time_n %} ({{ t.on_time_n }} dated){% endif %}</div></div>
     <div class="tile"><div class="num">{{ t.open }}</div><div class="lbl">Open tasks</div></div>
     <div class="tile{% if t.overdue %} warn{% endif %}"><div class="num">{{ t.overdue }}</div><div class="lbl">Overdue</div></div>
+    <div class="tile"><div class="num">{{ t.postponed_30 }}</div><div class="lbl">Due dates pushed back, last 30 days</div></div>
+    <div class="tile"><div class="num">{{ t.postponed_overdue_30 }}</div><div class="lbl">…of those, after already overdue</div></div>
+    <div class="tile"><div class="num">{{ t.total_done }}</div><div class="lbl">Completed all-time</div></div>
   </div>
 
   <div class="section">
     <h2>Completed per week</h2>
-    <div class="sub">Last {{ s.weekly | length }} weeks · {{ t.total_done }} completed all-time</div>
+    <div class="sub">Last {{ s.weekly | length }} weeks</div>
     {% set wmax = [s.weekly | map(attribute='count') | max, 1] | max %}
     <div class="cols">
       {% for w in s.weekly %}
@@ -138,6 +141,19 @@
       </ul>
       {% else %}<p class="empty">Nothing overdue. 🎉</p>{% endif %}
     </div>
+  </div>
+
+  <div class="section" style="margin-top:20px">
+    <h2>Most postponed</h2>
+    <div class="sub">Open tasks whose due date you've pushed back the most. Several pushes usually means the date isn't real: pick an honest one, or drop it.</div>
+    {% if s.most_postponed %}
+    <ul class="linger">
+      {% for m in s.most_postponed %}
+      <li><span>{{ m.description }}</span>
+          <span class="age" style="color:var(--text2)">{{ m.count }}× · {{ m.days }} day{{ '' if m.days == 1 else 's' }} total</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="empty">No postponements recorded yet. Tracking started when this feature was added.</p>{% endif %}
   </div>
 </div>
 </div>

@@ -144,7 +144,14 @@ class Task:
         return hashlib.md5(self.to_line().encode()).hexdigest()[:8]
 
     def set_id(self, val):         self._set('#id', val)
-    def set_due(self, val):        self._set('#due', val)
+    def set_due(self, val):
+        # Remember postponements (an open task's due date pushed later) so
+        # write_tasks() can log them for the stats page. Pulling a date in, or
+        # setting one for the first time, isn't a postponement.
+        old = self.due
+        if old and val and val > old and not self.complete:
+            self.__dict__.setdefault('_postponed', []).append((old, val))
+        self._set('#due', val)
     def set_priority(self, val):   self._set('#p', val)
     def set_context(self, val):    self._set('#ctx', val)
     def set_project(self, val):    self._set('#proj', val)
@@ -509,6 +516,44 @@ def write_tasks(tasks, tasks_file: Path, extra_lines: list | None = None,
             final_lines.append('')
 
     _write_text_atomic(tasks_file, '\n'.join(final_lines))
+    _log_postponements(tasks, tasks_file.parent / HISTORY_NAME)
+
+
+HISTORY_NAME = "history.jsonl"
+
+
+def _log_postponements(tasks, history_file: Path) -> None:
+    """Append one JSON line per due-date postponement made in this write.
+
+    Append-only and tiny, so it never slows routine writes. Logged after the
+    tasks file is saved: a crash in between loses a stats event, never a task.
+    """
+    import json
+    today = date.today().isoformat()
+    lines = []
+    for t in tasks:
+        for old, new in t.__dict__.pop('_postponed', ()):
+            lines.append(json.dumps({"date": today, "type": "postpone", "id": t.id,
+                                     "description": t.description,
+                                     "from": old, "to": new, "overdue": old < today}))
+    if lines:
+        with open(history_file, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+
+
+def read_history(history_file: Path) -> list:
+    import json
+    out = []
+    try:
+        with open(history_file, encoding="utf-8") as f:
+            for ln in f:
+                try:
+                    out.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except FileNotFoundError:
+        pass
+    return out
 
 
 def get_all_contexts(tasks_file: Path):
