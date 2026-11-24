@@ -9,14 +9,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install flask pytest
+        run: pip install -r requirements.txt pytest
+
+      # src/config.py refuses to start without config.json; tests point it at
+      # a temp copy per test, but the import needs one to exist.
+      - name: Create config
+        run: cp config.json.example config.json
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -q
