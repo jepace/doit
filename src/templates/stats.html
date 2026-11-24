@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Stats — doit{% endblock %}
+
+{% block head %}
+<style>
+  .stats-wrap { max-width: 860px; margin: 0 auto; padding: 24px 16px 48px; }
+  .back-link { display: inline-flex; align-items: center; gap: 5px; font-size: 14px;
+               color: var(--accent); text-decoration: none; margin-bottom: 10px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 20px; padding-right: 44px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr);
+           gap: 12px; margin-bottom: 20px; }
+  @media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile { background: var(--bg2); border-radius: 14px; padding: 14px 16px; }
+  .tile .num { font-size: 30px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tile .lbl { font-size: 12px; color: var(--text2); margin-top: 4px; }
+  .tile.warn .num { color: var(--danger); }
+
+  .section { background: var(--bg2); border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; }
+  .section h2 { font-size: 13px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: .06em; color: var(--text2); margin-bottom: 4px; }
+  .section .sub { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 700px) { .grid2 { grid-template-columns: 1fr; } }
+  .grid2 .section { margin-bottom: 0; }
+
+  /* Weekly column chart */
+  .cols { display: flex; align-items: flex-end; gap: 2px; height: 150px;
+          border-bottom: 1px solid var(--border); position: relative; }
+  .col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; }
+  .col .bar { width: 100%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 0; }
+  .col:hover .bar { filter: brightness(1.2); }
+  .col.now .bar { background: var(--accent-dark, var(--accent)); }
+  .avg-line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--text2); opacity: .6; }
+  .avg-lbl { position: absolute; right: 0; transform: translateY(-115%); font-size: 11px; color: var(--text2);
+             background: var(--bg2); padding: 0 4px; border-radius: 4px; }
+  .xaxis { display: flex; justify-content: space-between; font-size: 11px; color: var(--text2); margin-top: 4px; }
+
+  /* Horizontal bars */
+  .hbars { display: grid; grid-template-columns: max-content 1fr max-content; gap: 6px 10px; align-items: center; }
+  .hbars .k { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+  .hbars .track { height: 14px; }
+  .hbars .fill { height: 100%; background: var(--accent); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbars .fill.zero { background: var(--border); }
+  .hbars .fill.danger { background: var(--danger); }
+  .hbars .v { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; text-align: right; }
+
+  .linger { list-style: none; }
+  .linger li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0;
+               border-top: 1px solid var(--border); font-size: 14px; }
+  .linger li:first-child { border-top: none; }
+  .linger .age { color: var(--danger); white-space: nowrap; font-size: 13px; }
+  .empty { color: var(--text2); font-size: 14px; }
+
+  /* Hover tooltip */
+  #tip { position: fixed; pointer-events: none; background: var(--text); color: var(--bg);
+         font-size: 12px; padding: 4px 8px; border-radius: 6px; opacity: 0; transition: opacity .1s;
+         white-space: nowrap; z-index: 500; }
+</style>
+{% endblock %}
+
+{% macro hbars(rows, danger_label=None) -%}
+  {% set mx = rows | map(attribute='count') | max if rows else 0 %}
+  <div class="hbars">
+  {% for r in rows %}
+    <div class="k" title="{{ r.label }}">{{ r.label }}</div>
+    <div class="track" data-tip="{{ r.label }}: {{ r.count }}">
+      <div class="fill{% if not r.count %} zero{% elif r.label == danger_label %} danger{% endif %}"
+           style="width: {{ (100 * r.count / mx) if mx else 0 }}%"></div>
+    </div>
+    <div class="v">{{ r.count }}</div>
+  {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% block body %}
+<div class="page">
+<div class="stats-wrap">
+  <a href="/" class="back-link">‹ Do It!</a>
+  <h1>Stats</h1>
+
+  {% set t = s.tiles %}
+  <div class="tiles">
+    <div class="tile"><div class="num">{{ t.done_week }}</div><div class="lbl">Done this week</div></div>
+    <div class="tile"><div class="num">{{ t.done_30 }}</div><div class="lbl">Done, last 30 days</div></div>
+    <div class="tile"><div class="num">{{ t.streak }}</div><div class="lbl">Day streak (≥1 done/day)</div></div>
+    <div class="tile"><div class="num">{{ '%d%%' % t.on_time_pct if t.on_time_pct is not none else '—' }}</div>
+      <div class="lbl">On time, last 90 days{% if t.on_time_n %} ({{ t.on_time_n }} dated){% endif %}</div></div>
+    <div class="tile"><div class="num">{{ t.open }}</div><div class="lbl">Open tasks</div></div>
+    <div class="tile{% if t.overdue %} warn{% endif %}"><div class="num">{{ t.overdue }}</div><div class="lbl">Overdue</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Completed per week</h2>
+    <div class="sub">Last {{ s.weekly | length }} weeks · {{ t.total_done }} completed all-time</div>
+    {% set wmax = [s.weekly | map(attribute='count') | max, 1] | max %}
+    <div class="cols">
+      {% for w in s.weekly %}
+      <div class="col{% if loop.last %} now{% endif %}" data-tip="Week of {{ w.start }}: {{ w.count }} done">
+        <div class="bar" style="height: {{ 100 * w.count / wmax }}%"></div>
+      </div>
+      {% endfor %}
+      {% if s.avg_week %}
+      <div class="avg-line" style="bottom: {{ 100 * s.avg_week / wmax }}%"><span class="avg-lbl">avg {{ s.avg_week }}/wk</span></div>
+      {% endif %}
+    </div>
+    <div class="xaxis"><span>{{ s.weekly[0].start }}</span><span>This week</span></div>
+  </div>
+
+  <div class="grid2">
+    <div class="section">
+      <h2>Open tasks by due date</h2>
+      <div class="sub">What's on your plate</div>
+      {{ hbars(s.open_by_due, 'Overdue') }}
+    </div>
+    <div class="section">
+      <h2>Busiest days</h2>
+      <div class="sub">Completions by weekday, last 90 days</div>
+      {{ hbars(s.by_dow) }}
+    </div>
+  </div>
+  <div style="height:20px"></div>
+
+  <div class="grid2">
+    <div class="section">
+      <h2>Done by context</h2>
+      <div class="sub">Last 90 days</div>
+      {% if s.by_ctx %}{{ hbars(s.by_ctx) }}{% else %}<p class="empty">Nothing completed yet.</p>{% endif %}
+    </div>
+    <div class="section">
+      <h2>Longest overdue</h2>
+      <div class="sub">Open tasks that have waited the longest</div>
+      {% if s.lingering %}
+      <ul class="linger">
+        {% for l in s.lingering %}
+        <li><span>{{ l.description }}</span><span class="age">{{ l.days }} day{{ '' if l.days == 1 else 's' }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="empty">Nothing overdue. 🎉</p>{% endif %}
+    </div>
+  </div>
+</div>
+</div>
+<div id="tip"></div>
+<script>
+(() => {
+  const tip = document.getElementById('tip');
+  document.querySelectorAll('[data-tip]').forEach(el => {
+    el.addEventListener('mousemove', e => {
+      tip.textContent = el.dataset.tip;
+      tip.style.left = (e.clientX + 12) + 'px';
+      tip.style.top  = (e.clientY - 28) + 'px';
+      tip.style.opacity = 1;
+    });
+    el.addEventListener('mouseleave', () => { tip.style.opacity = 0; });
+  });
+})();
+</script>
+{% endblock %}

@@ -1221,3 +1221,20 @@ class TestBulkArchiveReopen:
         assert r.status_code == 200
         ids = {t.id for t in read_tasks(get_tasks_file(user["id"]))}
         assert "abc999" in ids, (get_tasks_file(user["id"]).read_text(), af.read_text())
+
+
+class TestStats:
+    def test_stats_page_renders(self, authed_client):
+        import user_store as us
+        from datetime import date, timedelta
+        from task_manager import get_archive_file, ARCHIVE_HEADER
+        user = us.UserStore.get_by_email(TEST_EMAIL)
+        d = (date.today() - timedelta(days=1)).isoformat()
+        get_archive_file(user["id"]).write_text(
+            ARCHIVE_HEADER + f"- [x] Old thing #ctx:home #due:{d} #done:{d} #id:dd0001\n")
+        r = authed_client.get("/stats")
+        assert r.status_code == 200
+        assert b"Completed per week" in r.data and b"100%" in r.data
+
+    def test_stats_requires_login(self, client):
+        assert client.get("/stats").status_code == 302

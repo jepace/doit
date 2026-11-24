@@ -273,6 +273,7 @@ def inject_globals():
     csrf_token = generate_csrf() if session.get("user_id") or session.get("csrf_token") else ""
     path   = request.path
     active = ("settings" if path.startswith("/settings")
+              else "stats"  if path.startswith("/stats")
               else "admin"  if path.startswith("/admin")
               else "tasks")
     return {"current_user": g.get("user"), "csrf_token": csrf_token, "active": active}
@@ -753,6 +754,16 @@ def tasks_archive():
         "notes":        t.notes,
         "done":         t.tags.get("#done"),
     } for t in archived]}
+
+
+@app.route("/stats")
+@require_login
+def stats_page():
+    from datetime import date
+    from stats import compute_stats
+    data = compute_stats(read_tasks(_get_tasks_file()),
+                         read_tasks(_get_archive_file()), date.today())
+    return render_template("stats.html", s=data)
 
 
 @app.route("/tasks/print")
